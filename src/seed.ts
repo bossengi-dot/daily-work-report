@@ -12,7 +12,7 @@ export const BUSINESS_DAYS = [
   '2026-09-17',
 ] as const
 
-export const STORAGE_KEY = 'daily-report-mvp-v4'
+export const STORAGE_KEY = 'daily-report-mvp-v5'
 export const SETTINGS_KEY = 'daily-report-mvp-settings-v1'
 export const SESSION_KEY = 'daily-report-mvp-session-v1'
 
@@ -552,6 +552,17 @@ export function createSeed(): AppState {
     reports,
     topics: [],
     weeklyTodos: [],
+    joinApplications: [
+      {
+        id: 'ja-seed-1',
+        name: '송하린',
+        dept: '기술부',
+        desiredPin: '1212',
+        memo: '신규 입사 — 현장지원 예정',
+        status: 'pending',
+        createdAt: `${TODAY} 10:00`,
+      },
+    ],
   }
 }
 

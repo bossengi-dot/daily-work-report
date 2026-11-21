@@ -1,4 +1,5 @@
 import { EmployeeForm } from './components/EmployeeForm'
+import { JoinAdminScreen } from './components/JoinAdminScreen'
 import { LoginScreen } from './components/LoginScreen'
 import { ManagerBoard } from './components/ManagerBoard'
 import { MonthlySummary } from './components/MonthlySummary'
@@ -52,6 +53,16 @@ export default function App() {
             </button>
             <button
               type="button"
+              className={view === 'join-admin' ? 'active' : ''}
+              onClick={() => setView('join-admin')}
+            >
+              가입신청
+              {state.joinApplications.some((j) => j.status === 'pending') && (
+                <span className="nav-dot" aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
               className={view === 'settings' ? 'active' : ''}
               onClick={() => setView('settings')}
             >
@@ -102,7 +113,9 @@ export default function App() {
                     ? '주간 요약'
                     : view === 'monthly'
                       ? '월간 리포트'
-                      : '설정'}
+                      : view === 'join-admin'
+                        ? '가입신청'
+                        : '설정'}
               </span>
             </div>
           )}
@@ -122,6 +135,7 @@ export default function App() {
         {isManager && view === 'manager' && <ManagerBoard />}
         {isManager && view === 'weekly' && <WeeklySummary />}
         {isManager && view === 'monthly' && <MonthlySummary />}
+        {isManager && view === 'join-admin' && <JoinAdminScreen />}
         {view === 'settings' && <SettingsScreen />}
         {!isManager && view !== 'employee' && view !== 'settings' && <EmployeeForm />}
 

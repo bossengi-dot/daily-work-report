@@ -2,7 +2,13 @@ export type ItemStatus = 'done' | 'in_progress' | 'blocker'
 export type ReportStatus = 'draft' | 'submitted' | 'reviewing' | 'done' | 'revision'
 export type ReflectStatus = 'reflected' | 'unreflected'
 export type AttachmentKind = 'url' | 'image' | 'file'
-export type RoleView = 'employee' | 'manager' | 'weekly' | 'monthly' | 'settings'
+export type RoleView =
+  | 'employee'
+  | 'manager'
+  | 'weekly'
+  | 'monthly'
+  | 'settings'
+  | 'join-admin'
 export type ManagerAck = 'thumbsup' | 'confirmed' | null
 export type SessionRole = 'employee' | 'manager'
 
@@ -107,6 +113,23 @@ export interface AppSettings {
   llmApiKey: string
 }
 
+export type JoinAppStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
+
+export interface JoinApplication {
+  id: string
+  name: string
+  dept: string
+  desiredPin?: string
+  memo: string
+  status: JoinAppStatus
+  createdAt: string
+  reviewedAt?: string
+  rejectReason?: string
+  /** set on approve when PIN was auto-generated */
+  issuedPin?: string
+  employeeId?: string
+}
+
 export interface Session {
   role: SessionRole
   employeeId: string | null
@@ -118,6 +141,7 @@ export interface AppState {
   reports: DailyReport[]
   topics: TopicCard[]
   weeklyTodos: WeeklyTodo[]
+  joinApplications: JoinApplication[]
   currentDate: string
   weekRange: { start: string; end: string }
   monthRange: { start: string; end: string }

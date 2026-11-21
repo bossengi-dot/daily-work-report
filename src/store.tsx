@@ -21,6 +21,7 @@ import type {
   CeoInstruction,
   DailyReport,
   Employee,
+  JoinApplication,
   ManagerAck,
   OooPeriod,
   ReflectStatus,
@@ -66,27 +67,36 @@ function loadSession(): Session | null {
 }
 
 function loadState(): AppState {
+  const seed = createSeed()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as AppState
+      const parsed = JSON.parse(raw) as Partial<AppState>
       return {
-        ...createSeed(),
+        ...seed,
         ...parsed,
         settings: loadSettings(),
-        monthRange: parsed.monthRange ?? createSeed().monthRange,
-        employees: (parsed.employees ?? createSeed().employees).map((e) => ({
+        monthRange: parsed.monthRange ?? seed.monthRange,
+        employees: (parsed.employees ?? seed.employees).map((e) => ({
           ...e,
           pin: e.pin || '1111',
         })),
+        joinApplications: parsed.joinApplications ?? seed.joinApplications,
       }
     }
   } catch {
     /* ignore */
   }
-  const seed = createSeed()
   seed.settings = loadSettings()
   return seed
+}
+
+function randomPin(): string {
+  return String(Math.floor(1000 + Math.random() * 9000))
+}
+
+function initialsOf(name: string): string {
+  return name.trim().slice(0, 1) || '?'
 }
 
 interface StoreValue {
@@ -144,6 +154,23 @@ interface StoreValue {
   updateSettings: (patch: Partial<AppSettings>) => void
   setEmployeeOoo: (employeeId: string, ooo: OooPeriod | null) => void
   updateEmployee: (employeeId: string, patch: Partial<Employee>) => void
+  submitJoinApplication: (input: {
+    name: string
+    dept: string
+    desiredPin?: string
+    memo: string
+  }) => boolean
+  approveJoinApplication: (id: string) => { ok: boolean; pin?: string; name?: string }
+  rejectJoinApplication: (id: string, reason?: string) => void
+  cancelJoinApplication: (id: string) => void
+  registerEmployeeDirect: (input: {
+    name: string
+    dept: string
+    pin?: string
+    role?: string
+  }) => { ok: boolean; pin?: string; employeeId?: string }
+  lastIssuedPin: { name: string; pin: string } | null
+  clearLastIssuedPin: () => void
 }
 
 const StoreContext = createContext<StoreValue | null>(null)
@@ -156,6 +183,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => loadSession()?.employeeId ?? 'e1',
   )
   const [toast, setToast] = useState<Toast | null>(null)
+  const [lastIssuedPin, setLastIssuedPin] = useState<{
+    name: string
+    pin: string
+  } | null>(null)
 
   useEffect(() => {
     const { settings: _s, ...rest } = state
@@ -621,6 +652,218 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
+  const clearLastIssuedPin = useCallback(() => setLastIssuedPin(null), [])
+
+  const submitJoinApplication = useCallback(
+    (input: { name: string; dept: string; desiredPin?: string; memo: string }) => {
+      const name = input.name.trim()
+      const dept = input.dept.trim()
+      if (!name || !dept) {
+        showToast('이름과 부서를 입력해 주세요.')
+        return false
+      }
+      if (state.employees.some((e) => e.name === name)) {
+        showToast('이미 등록된 이름입니다. 관리자에게 문의하세요.')
+        return false
+      }
+      if (
+        state.joinApplications.some(
+          (j) => j.status === 'pending' && j.name === name,
+        )
+      ) {
+        showToast('이미 대기 중인 가입 신청이 있습니다.')
+        return false
+      }
+      const pin = input.desiredPin?.trim()
+      if (pin && !/^\d{4}$/.test(pin)) {
+        showToast('희망 PIN은 숫자 4자리여야 합니다.')
+        return false
+      }
+      const app: JoinApplication = {
+        id: uid('ja'),
+        name,
+        dept,
+        desiredPin: pin || undefined,
+        memo: input.memo.trim(),
+        status: 'pending',
+        createdAt: nowStamp(state.currentDate),
+      }
+      setState((s) => ({
+        ...s,
+        joinApplications: [app, ...s.joinApplications],
+      }))
+      showToast('가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.')
+      return true
+    },
+    [state.employees, state.joinApplications, state.currentDate, showToast],
+  )
+
+  const approveJoinApplication = useCallback(
+    (id: string): { ok: boolean; pin?: string; name?: string } => {
+      const app = state.joinApplications.find((j) => j.id === id)
+      if (!app || app.status !== 'pending') {
+        showToast('대기 중인 신청이 아닙니다.')
+        return { ok: false }
+      }
+      let pin = app.desiredPin?.trim()
+      let generated = false
+      if (!pin || !/^\d{4}$/.test(pin)) {
+        pin = randomPin()
+        generated = true
+      }
+      const employeeId = uid('e')
+      const employee: Employee = {
+        id: employeeId,
+        name: app.name,
+        dept: app.dept,
+        role: '팀원',
+        initials: initialsOf(app.name),
+        pin,
+        ooo: null,
+      }
+      const stamp = nowStamp(state.currentDate)
+      setState((s) => ({
+        ...s,
+        employees: [...s.employees, employee],
+        joinApplications: s.joinApplications.map((j) =>
+          j.id === id
+            ? {
+                ...j,
+                status: 'approved' as const,
+                reviewedAt: stamp,
+                issuedPin: generated ? pin : undefined,
+                employeeId,
+              }
+            : j,
+        ),
+        reports: [
+          ...s.reports,
+          {
+            id: uid('r'),
+            employeeId,
+            date: s.currentDate,
+            status: 'draft',
+            memo: '',
+            plan: [],
+            execution: [],
+            carryover: [],
+            instructions: [],
+          },
+        ],
+      }))
+      setLastIssuedPin({ name: app.name, pin })
+      showToast(
+        generated
+          ? `${app.name} 승인 · 발급 PIN ${pin} (이 화면에서만 확인)`
+          : `${app.name} 승인 · 희망 PIN으로 등록됨`,
+      )
+      return { ok: true, pin, name: app.name }
+    },
+    [state.joinApplications, state.currentDate, showToast],
+  )
+
+  const rejectJoinApplication = useCallback(
+    (id: string, reason?: string) => {
+      const stamp = nowStamp(state.currentDate)
+      setState((s) => ({
+        ...s,
+        joinApplications: s.joinApplications.map((j) =>
+          j.id === id && j.status === 'pending'
+            ? {
+                ...j,
+                status: 'rejected' as const,
+                reviewedAt: stamp,
+                rejectReason: reason?.trim() || undefined,
+              }
+            : j,
+        ),
+      }))
+      showToast('가입 신청을 거절했습니다.')
+    },
+    [state.currentDate, showToast],
+  )
+
+  const cancelJoinApplication = useCallback(
+    (id: string) => {
+      const stamp = nowStamp(state.currentDate)
+      setState((s) => ({
+        ...s,
+        joinApplications: s.joinApplications.map((j) =>
+          j.id === id && j.status === 'pending'
+            ? { ...j, status: 'cancelled' as const, reviewedAt: stamp }
+            : j,
+        ),
+      }))
+      showToast('대기 신청을 취소했습니다.')
+    },
+    [state.currentDate, showToast],
+  )
+
+  const registerEmployeeDirect = useCallback(
+    (input: {
+      name: string
+      dept: string
+      pin?: string
+      role?: string
+    }): { ok: boolean; pin?: string; employeeId?: string } => {
+      const name = input.name.trim()
+      const dept = input.dept.trim()
+      if (!name || !dept) {
+        showToast('이름과 부서를 입력해 주세요.')
+        return { ok: false }
+      }
+      if (state.employees.some((e) => e.name === name)) {
+        showToast('이미 등록된 이름입니다.')
+        return { ok: false }
+      }
+      let pin = input.pin?.trim()
+      let generated = false
+      if (!pin) {
+        pin = randomPin()
+        generated = true
+      } else if (!/^\d{4}$/.test(pin)) {
+        showToast('PIN은 숫자 4자리여야 합니다.')
+        return { ok: false }
+      }
+      const employeeId = uid('e')
+      const employee: Employee = {
+        id: employeeId,
+        name,
+        dept,
+        role: input.role?.trim() || '팀원',
+        initials: initialsOf(name),
+        pin,
+        ooo: null,
+      }
+      setState((s) => ({
+        ...s,
+        employees: [...s.employees, employee],
+        reports: [
+          ...s.reports,
+          {
+            id: uid('r'),
+            employeeId,
+            date: s.currentDate,
+            status: 'draft',
+            memo: '',
+            plan: [],
+            execution: [],
+            carryover: [],
+            instructions: [],
+          },
+        ],
+      }))
+      setLastIssuedPin({ name, pin })
+      showToast(
+        generated
+          ? `${name} 등록 · 발급 PIN ${pin}`
+          : `${name}을(를) 등록했습니다.`,
+      )
+      return { ok: true, pin, employeeId }
+    },
+    [state.employees, showToast],
+  )
+
   const value = useMemo<StoreValue>(
     () => ({
       state,
@@ -657,6 +900,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateSettings,
       setEmployeeOoo,
       updateEmployee,
+      submitJoinApplication,
+      approveJoinApplication,
+      rejectJoinApplication,
+      cancelJoinApplication,
+      registerEmployeeDirect,
+      lastIssuedPin,
+      clearLastIssuedPin,
     }),
     [
       state,
@@ -691,6 +941,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateSettings,
       setEmployeeOoo,
       updateEmployee,
+      submitJoinApplication,
+      approveJoinApplication,
+      rejectJoinApplication,
+      cancelJoinApplication,
+      registerEmployeeDirect,
+      lastIssuedPin,
+      clearLastIssuedPin,
     ],
   )
 

@@ -80,7 +80,7 @@ export function LoginScreen() {
               직원 로그인
             </button>
             <p className="hint" style={{ marginTop: 10 }}>
-              시드 PIN: 박도형 1111 · 김민수 2222 · 이서연 3333
+              시드 PIN 예: 박도형 1111 · 최유진 4444 · 배수아 1010 (카드에 힌트 표시)
             </p>
           </>
         ) : (

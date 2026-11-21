@@ -81,6 +81,16 @@ export async function createLocalAccount(input: {
   return row
 }
 
+export async function deleteLocalAccount(id: string): Promise<void> {
+  await sql(`delete from local_accounts where id = $1`, [id])
+  // Free one-time invite codes that pointed at this account so re-use is not blocked
+  // by leftover used_by references (env INVITE_CODE is unaffected).
+  await sql(
+    `update invite_codes set used_by = null, used_at = null where used_by = $1`,
+    [id],
+  )
+}
+
 /** Create bootstrap manager from env once, if no managers exist. */
 export async function ensureBootstrapManager(
   stage: 'production' | 'preview' = 'production',

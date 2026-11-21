@@ -66,7 +66,7 @@ export default function App() {
               className={view === 'join-admin' ? 'active' : ''}
               onClick={() => setView('join-admin')}
             >
-              가입신청
+              구성원
               {state.joinApplications.some((j) => j.status === 'pending') && (
                 <span className="nav-dot" aria-hidden />
               )}
@@ -125,7 +125,7 @@ export default function App() {
                     : view === 'monthly'
                       ? '월간 리포트'
                       : view === 'join-admin'
-                        ? '가입신청'
+                        ? '구성원 · 가입'
                         : '설정'}
               </span>
             </div>

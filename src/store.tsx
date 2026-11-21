@@ -120,7 +120,27 @@ interface StoreValue {
     name: string
     dept: string
     role?: string
-  }) => Promise<{ ok: boolean; employeeId?: string }>
+    email?: string
+    password?: string
+  }) => Promise<{ ok: boolean; employeeId?: string; message?: string }>
+  deleteMember: (employeeId: string) => Promise<{ ok: boolean; message?: string }>
+  fetchMembers: () => Promise<
+    | {
+        ok: true
+        members: Array<{
+          employeeId: string
+          name: string
+          dept: string
+          role: string
+          ooo: boolean
+          linked: boolean
+          cursorSub: string | null
+          email: string | null
+          accountRole: 'employee' | 'manager' | null
+        }>
+      }
+    | { ok: false; message?: string }
+  >
 }
 
 const StoreContext = createContext<StoreValue | null>(null)
@@ -532,17 +552,64 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const registerEmployeeDirect = useCallback(
-    async (input: { name: string; dept: string; role?: string }) => {
+    async (input: {
+      name: string
+      dept: string
+      role?: string
+      email?: string
+      password?: string
+    }) => {
       const result = await run({
         type: 'registerEmployee',
         name: input.name,
         dept: input.dept,
         role: input.role,
+        email: input.email,
+        password: input.password,
       })
-      return { ok: result.ok, employeeId: result.employeeId }
+      return {
+        ok: result.ok,
+        employeeId: result.employeeId,
+        message: result.message,
+      }
     },
     [run],
   )
+
+  const deleteMember = useCallback(
+    async (employeeId: string) => {
+      const result = await run({ type: 'deleteMember', employeeId })
+      return { ok: result.ok, message: result.message }
+    },
+    [run],
+  )
+
+  const fetchMembers = useCallback(async () => {
+    const res = await fetch('/api/members', { cache: 'no-store' })
+    const data = (await res.json()) as {
+      ok?: boolean
+      members?: Array<{
+        employeeId: string
+        name: string
+        dept: string
+        role: string
+        ooo: boolean
+        linked: boolean
+        cursorSub: string | null
+        email: string | null
+        accountRole: 'employee' | 'manager' | null
+      }>
+      error?: string
+      message?: string
+    }
+    if (!res.ok || !data.ok || !data.members) {
+      return {
+        ok: false as const,
+        message: data.message ?? '구성원 목록을 불러오지 못했습니다.',
+      }
+    }
+    return { ok: true as const, members: data.members }
+  }, [])
 
   const value = useMemo<StoreValue>(
     () => ({
@@ -590,6 +657,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       rejectJoinApplication,
       cancelJoinApplication,
       registerEmployeeDirect,
+      deleteMember,
+      fetchMembers,
     }),
     [
       ready,
@@ -634,6 +703,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       rejectJoinApplication,
       cancelJoinApplication,
       registerEmployeeDirect,
+      deleteMember,
+      fetchMembers,
     ],
   )
 

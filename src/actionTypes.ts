@@ -15,7 +15,16 @@ export type ClientAction =
   | { type: 'approveJoin'; id: string }
   | { type: 'rejectJoin'; id: string; reason?: string }
   | { type: 'cancelJoin'; id: string }
-  | { type: 'registerEmployee'; name: string; dept: string; role?: string }
+  | {
+      type: 'registerEmployee'
+      name: string
+      dept: string
+      role?: string
+      /** Local AUTH_MODE only — creates login + employee role immediately */
+      email?: string
+      password?: string
+    }
+  | { type: 'deleteMember'; employeeId: string }
   | { type: 'updateReport'; reportId: string; patch: Partial<DailyReport> }
   | { type: 'saveDraft'; reportId: string }
   | { type: 'submitPlan'; reportId: string }

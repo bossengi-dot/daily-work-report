@@ -1,6 +1,6 @@
 import { sql } from '../lib/db'
 import { createSeed } from '../seed'
-import type { AppState } from '../types'
+import type { AppState, DailyReport } from '../types'
 import type { AppStage } from './auth'
 
 type StateRow = { data: AppState }
@@ -11,7 +11,13 @@ export async function loadAppState(stage: AppStage): Promise<AppState> {
     [stage],
   )
   if (rows[0]?.data) {
-    return normalizeState(rows[0].data)
+    const normalized = normalizeState(rows[0].data)
+    const ensured = ensureTodayReports(normalized)
+    if (ensured.changed) {
+      await saveAppState(stage, ensured.state)
+      return ensured.state
+    }
+    return ensured.state
   }
   const seed = createSeed()
   await saveAppState(stage, seed)
@@ -26,6 +32,45 @@ export async function saveAppState(stage: AppStage, state: AppState): Promise<vo
      on conflict (stage) do update set data = excluded.data, updated_at = now()`,
     [stage, JSON.stringify(clean)],
   )
+}
+
+function emptyTodayReport(employeeId: string, date: string): DailyReport {
+  return {
+    id: `r-${employeeId}-${date}`,
+    employeeId,
+    date,
+    status: 'draft',
+    memo: '',
+    plan: [],
+    execution: [],
+    carryover: [],
+    instructions: [],
+  }
+}
+
+/** Ensure every employee has a draft report for currentDate (fixes missing-report blocks). */
+export function ensureTodayReports(state: AppState): {
+  state: AppState
+  changed: boolean
+} {
+  const date = state.currentDate
+  const existing = new Set(
+    state.reports
+      .filter((r) => r.date === date)
+      .map((r) => r.employeeId),
+  )
+  const missing = state.employees.filter((e) => !existing.has(e.id))
+  if (missing.length === 0) return { state, changed: false }
+  return {
+    changed: true,
+    state: {
+      ...state,
+      reports: [
+        ...state.reports,
+        ...missing.map((e) => emptyTodayReport(e.id, date)),
+      ],
+    },
+  }
 }
 
 /** Strip any leftover PIN fields from persisted/seeded payloads. */

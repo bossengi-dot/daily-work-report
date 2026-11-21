@@ -114,6 +114,36 @@ export async function upsertRole(input: {
   return row
 }
 
+export async function listRoles(stage: AppStage): Promise<UserRoleRow[]> {
+  return sql<UserRoleRow>(
+    `select stage, cursor_sub, role, employee_id, display_name
+     from user_roles where stage = $1
+     order by role desc, display_name asc`,
+    [stage],
+  )
+}
+
+export async function listRolesByEmployeeId(
+  stage: AppStage,
+  employeeId: string,
+): Promise<UserRoleRow[]> {
+  return sql<UserRoleRow>(
+    `select stage, cursor_sub, role, employee_id, display_name
+     from user_roles where stage = $1 and employee_id = $2`,
+    [stage, employeeId],
+  )
+}
+
+export async function deleteRole(
+  stage: AppStage,
+  cursorSub: string,
+): Promise<void> {
+  await sql(`delete from user_roles where stage = $1 and cursor_sub = $2`, [
+    stage,
+    cursorSub,
+  ])
+}
+
 /** First signed-in person becomes manager when none exist. API keys never bootstrap. */
 export async function resolveViewerSession(
   identity: VerifiedIdentity,

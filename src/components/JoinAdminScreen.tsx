@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { JoinAppStatus } from '../types'
 import { useStore } from '../store'
 
@@ -11,6 +11,18 @@ const FILTERS: { id: JoinAppStatus | 'all'; label: string }[] = [
   { id: 'cancelled', label: '취소' },
   { id: 'all', label: '전체' },
 ]
+
+type MemberRow = {
+  employeeId: string
+  name: string
+  dept: string
+  role: string
+  ooo: boolean
+  linked: boolean
+  cursorSub: string | null
+  email: string | null
+  accountRole: 'employee' | 'manager' | null
+}
 
 function statusBadge(status: JoinAppStatus) {
   switch (status) {
@@ -33,6 +45,8 @@ export function JoinAdminScreen() {
     rejectJoinApplication,
     cancelJoinApplication,
     registerEmployeeDirect,
+    deleteMember,
+    fetchMembers,
     createInviteCode,
   } = useStore()
 
@@ -41,7 +55,14 @@ export function JoinAdminScreen() {
   const [rejectReason, setRejectReason] = useState('')
   const [directName, setDirectName] = useState('')
   const [directDept, setDirectDept] = useState('')
+  const [directEmail, setDirectEmail] = useState('')
+  const [directPassword, setDirectPassword] = useState('')
+  const [registerBusy, setRegisterBusy] = useState(false)
   const [lastInvite, setLastInvite] = useState<string | null>(null)
+  const [members, setMembers] = useState<MemberRow[]>([])
+  const [membersLoading, setMembersLoading] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<MemberRow | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const list = useMemo(() => {
     const apps = state.joinApplications
@@ -51,21 +72,53 @@ export function JoinAdminScreen() {
 
   const pendingCount = state.joinApplications.filter((a) => a.status === 'pending').length
 
+  const reloadMembers = useCallback(() => {
+    setMembersLoading(true)
+    void fetchMembers().then((res) => {
+      if (res.ok) setMembers(res.members)
+      setMembersLoading(false)
+    })
+  }, [fetchMembers])
+
+  useEffect(() => {
+    reloadMembers()
+  }, [reloadMembers, state.employees])
+
   const onReject = () => {
     if (!rejectId) return
-    void rejectJoinApplication(rejectId, rejectReason)
+    void rejectJoinApplication(rejectId, rejectReason).then(() => reloadMembers())
     setRejectId(null)
     setRejectReason('')
   }
 
   const onDirect = () => {
+    if (registerBusy) return
+    setRegisterBusy(true)
     void registerEmployeeDirect({
       name: directName,
       dept: directDept,
+      email: authMode === 'local' ? directEmail : undefined,
+      password: authMode === 'local' ? directPassword : undefined,
     }).then((res) => {
+      setRegisterBusy(false)
       if (res.ok) {
         setDirectName('')
         setDirectDept('')
+        setDirectEmail('')
+        setDirectPassword('')
+        reloadMembers()
+      }
+    })
+  }
+
+  const onConfirmDelete = () => {
+    if (!deleteTarget || deleteBusy) return
+    setDeleteBusy(true)
+    void deleteMember(deleteTarget.employeeId).then((res) => {
+      setDeleteBusy(false)
+      if (res.ok) {
+        setDeleteTarget(null)
+        reloadMembers()
       }
     })
   }
@@ -74,11 +127,11 @@ export function JoinAdminScreen() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>가입신청</h1>
+          <h1>구성원 · 가입</h1>
           <p>
-            대기 {pendingCount}건 ·{' '}
+            구성원 {members.length}명 · 가입 대기 {pendingCount}건 ·{' '}
             {authMode === 'local'
-              ? '승인 시 로컬 계정이 직원 역할로 연결됩니다.'
+              ? '로컬 계정을 직접 등록하거나 가입 신청을 승인합니다.'
               : '승인 시 Cursor 계정이 직원 역할로 연결됩니다.'}
           </p>
         </div>
@@ -113,13 +166,14 @@ export function JoinAdminScreen() {
       <div className="stack" style={{ gap: 16 }}>
         <section className="panel panel-pad">
           <div className="section-title">
-            <h2>직접 등록</h2>
+            <h2>구성원 등록</h2>
           </div>
           <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
-            데모용 직원 프로필만 만듭니다. 본인 로그인은 해당 사용자가 가입 신청 후 승인받아야
-            합니다.
+            {authMode === 'local'
+              ? '이름·부서·이메일·비밀번호로 계정을 만들면 바로 로그인하고 일일보고를 작성할 수 있습니다.'
+              : '직원 프로필만 만듭니다. 본인 로그인은 해당 사용자가 Cursor로 가입 신청 후 승인받아야 합니다.'}
           </p>
-          <div className="join-direct-grid">
+          <div className={`join-direct-grid ${authMode === 'local' ? 'join-direct-grid-local' : ''}`}>
             <div className="field">
               <label style={{ fontSize: 12, fontWeight: 600 }}>이름</label>
               <input
@@ -136,10 +190,39 @@ export function JoinAdminScreen() {
                 placeholder="부서"
               />
             </div>
+            {authMode === 'local' && (
+              <>
+                <div className="field">
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>이메일</label>
+                  <input
+                    type="email"
+                    autoComplete="off"
+                    value={directEmail}
+                    onChange={(e) => setDirectEmail(e.target.value)}
+                    placeholder="user@example.com"
+                  />
+                </div>
+                <div className="field">
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>비밀번호</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={directPassword}
+                    onChange={(e) => setDirectPassword(e.target.value)}
+                    placeholder="8자 이상"
+                  />
+                </div>
+              </>
+            )}
             <div className="field" style={{ justifyContent: 'flex-end' }}>
               <label style={{ fontSize: 12, visibility: 'hidden' }}>.</label>
-              <button type="button" className="btn btn-primary" onClick={onDirect}>
-                등록
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={registerBusy}
+                onClick={onDirect}
+              >
+                {registerBusy ? '등록 중…' : '등록'}
               </button>
             </div>
           </div>
@@ -147,7 +230,66 @@ export function JoinAdminScreen() {
 
         <section className="panel panel-pad">
           <div className="section-title" style={{ marginBottom: 12 }}>
-            <h2>신청 목록</h2>
+            <h2>구성원 목록</h2>
+          </div>
+          {membersLoading && members.length === 0 ? (
+            <div className="empty" style={{ padding: 24 }}>
+              불러오는 중…
+            </div>
+          ) : members.length === 0 ? (
+            <div className="empty" style={{ padding: 24 }}>
+              등록된 구성원이 없습니다.
+            </div>
+          ) : (
+            <div className="join-app-list">
+              {members.map((m) => (
+                <article key={m.employeeId} className="join-app-row">
+                  <div className="join-app-main">
+                    <div className="join-app-title">
+                      <strong>{m.name}</strong>
+                      {m.linked ? (
+                        <span className="badge badge-done">연결됨</span>
+                      ) : (
+                        <span className="badge badge-carry">미연결</span>
+                      )}
+                      {m.ooo && <span className="badge badge-revision">부재</span>}
+                    </div>
+                    <div className="hint">
+                      {m.dept}
+                      {' · '}
+                      {m.role}
+                      {m.email ? ` · ${m.email}` : ''}
+                      {!m.linked && authMode === 'local'
+                        ? ' · 로그인 계정 없음'
+                        : !m.linked
+                          ? ' · Cursor 가입 승인 대기'
+                          : ''}
+                    </div>
+                  </div>
+                  <div className="join-app-actions">
+                    <button
+                      type="button"
+                      className="btn btn-danger-outline btn-sm"
+                      disabled={m.accountRole === 'manager'}
+                      title={
+                        m.accountRole === 'manager'
+                          ? '관리자는 삭제할 수 없습니다'
+                          : '구성원 삭제'
+                      }
+                      onClick={() => setDeleteTarget(m)}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="panel panel-pad">
+          <div className="section-title" style={{ marginBottom: 12 }}>
+            <h2>가입 신청</h2>
           </div>
           <div className="filter-row" style={{ marginBottom: 12 }}>
             {FILTERS.map((f) => (
@@ -198,7 +340,9 @@ export function JoinAdminScreen() {
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"
-                        onClick={() => void approveJoinApplication(app.id)}
+                        onClick={() =>
+                          void approveJoinApplication(app.id).then(() => reloadMembers())
+                        }
                       >
                         승인
                       </button>
@@ -215,7 +359,9 @@ export function JoinAdminScreen() {
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        onClick={() => void cancelJoinApplication(app.id)}
+                        onClick={() =>
+                          void cancelJoinApplication(app.id).then(() => reloadMembers())
+                        }
                       >
                         대기 취소
                       </button>
@@ -252,6 +398,38 @@ export function JoinAdminScreen() {
               </button>
               <button type="button" className="btn btn-danger-outline" onClick={onReject}>
                 거절 확정
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-panel">
+            <h3 style={{ margin: '0 0 8px' }}>구성원 삭제</h3>
+            <p className="hint" style={{ marginBottom: 10 }}>
+              <strong>{deleteTarget.name}</strong>
+              {deleteTarget.email ? ` (${deleteTarget.email})` : ''}을(를) 삭제합니다.
+              연결된 로그인 계정·당일 보고·가입 기록이 함께 정리되어, 같은 이메일로 다시
+              등록할 수 있습니다.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={deleteBusy}
+                onClick={() => setDeleteTarget(null)}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger-outline"
+                disabled={deleteBusy}
+                onClick={onConfirmDelete}
+              >
+                {deleteBusy ? '삭제 중…' : '삭제 확정'}
               </button>
             </div>
           </div>

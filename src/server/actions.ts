@@ -13,7 +13,19 @@ import type {
 import { DEFAULT_SETTINGS } from '../types'
 import { createSeed } from '../seed'
 import type { ViewerSession } from './auth'
-import { upsertRole, type AppStage } from './auth'
+import {
+  deleteRole,
+  listRolesByEmployeeId,
+  loadRole,
+  upsertRole,
+  type AppStage,
+} from './auth'
+import {
+  authMode,
+  createLocalAccount,
+  deleteLocalAccount,
+  findAccountByEmail,
+} from './localAuth'
 import { loadAppState, saveAppState } from './stateRepo'
 
 export type { ClientAction }
@@ -228,6 +240,44 @@ export async function runAction(
       if (state.employees.some((e) => e.name === empName)) {
         return fail('duplicate', '이미 등록된 이름입니다.')
       }
+
+      const email = action.email?.trim().toLowerCase() ?? ''
+      const password = action.password ?? ''
+      const wantsLocalLogin = Boolean(email || password)
+
+      if (wantsLocalLogin) {
+        if (authMode() !== 'local') {
+          return fail(
+            'cursor_mode',
+            '이메일·비밀번호 등록은 로컬(AUTH_MODE=local)에서만 가능합니다. Cursor 사용자는 가입 신청 후 승인하세요.',
+          )
+        }
+        if (!email || !password || password.length < 8) {
+          return fail(
+            'invalid',
+            '이메일과 8자 이상 비밀번호가 필요합니다.',
+          )
+        }
+        const existingAccount = await findAccountByEmail(email)
+        if (existingAccount) {
+          const existingRole = await loadRole(stage, existingAccount.id)
+          if (existingRole) {
+            return fail(
+              'email_taken',
+              '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.',
+            )
+          }
+          // Invite-created account that never got a role — reclaim email.
+          await deleteLocalAccount(existingAccount.id)
+          state = {
+            ...state,
+            joinApplications: state.joinApplications.filter(
+              (j) => j.applicantSub !== existingAccount.id,
+            ),
+          }
+        }
+      }
+
       const newEmployeeId = uid('e')
       const employee: Employee = {
         id: newEmployeeId,
@@ -255,9 +305,70 @@ export async function runAction(
           },
         ],
       }
-      message = `${empName}을(를) 등록했습니다. Cursor 가입 승인 후 본인 계정으로 로그인합니다.`
+
+      if (wantsLocalLogin) {
+        const account = await createLocalAccount({
+          email,
+          password,
+          displayName: empName,
+        })
+        await upsertRole({
+          stage,
+          cursorSub: account.id,
+          role: 'employee',
+          employeeId: newEmployeeId,
+          displayName: empName,
+        })
+        message = `${empName} 계정을 등록했습니다. 바로 로그인·일일보고 작성이 가능합니다.`
+      } else {
+        message =
+          authMode() === 'local'
+            ? `${empName} 프로필만 등록했습니다. 로그인하려면 이메일·비밀번호를 함께 입력하세요.`
+            : `${empName}을(를) 등록했습니다. Cursor 가입 승인 후 본인 계정으로 로그인합니다.`
+      }
       employeeId = newEmployeeId
       name = empName
+      break
+    }
+    case 'deleteMember': {
+      if (!isManager(session)) return fail('forbidden')
+      const targetId = action.employeeId
+      const emp = state.employees.find((e) => e.id === targetId)
+      if (!emp) return fail('not_found', '구성원을 찾을 수 없습니다.')
+
+      const linkedRoles = await listRolesByEmployeeId(stage, targetId)
+      if (linkedRoles.some((r) => r.role === 'manager')) {
+        return fail('forbidden', '관리자 계정은 이 화면에서 삭제할 수 없습니다.')
+      }
+      if (linkedRoles.some((r) => r.cursor_sub === session.cursorSub)) {
+        return fail('forbidden', '본인 계정은 삭제할 수 없습니다.')
+      }
+
+      for (const role of linkedRoles) {
+        await deleteRole(stage, role.cursor_sub)
+        if (authMode() === 'local' && role.cursor_sub.startsWith('local:')) {
+          await deleteLocalAccount(role.cursor_sub)
+        }
+      }
+
+      // Orphan local accounts that only had a pending join (no employee_id yet)
+      // are not tied here; join cleanup below clears applicant references.
+
+      const removedSubs = new Set(linkedRoles.map((r) => r.cursor_sub))
+      state = {
+        ...state,
+        employees: state.employees.filter((e) => e.id !== targetId),
+        reports: state.reports.filter((r) => r.employeeId !== targetId),
+        weeklyTodos: state.weeklyTodos.filter((t) => t.assigneeId !== targetId),
+        joinApplications: state.joinApplications.filter((j) => {
+          if (j.employeeId === targetId) return false
+          if (j.applicantSub && removedSubs.has(j.applicantSub)) return false
+          return true
+        }),
+      }
+      message = `${emp.name} 구성원과 연결된 계정·보고 데이터를 삭제했습니다.`
+      name = emp.name
+      employeeId = targetId
       break
     }
     case 'updateReport': {

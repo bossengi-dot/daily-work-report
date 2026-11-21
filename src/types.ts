@@ -137,6 +137,8 @@ export interface Session {
   simulated: boolean
   needsJoin: boolean
   kind: 'person' | 'key'
+  /** cursor = Cursor SSO; local = NAS email/password */
+  authMode?: 'cursor' | 'local'
 }
 
 export interface AppState {

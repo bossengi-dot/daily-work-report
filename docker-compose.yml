@@ -1,0 +1,47 @@
+# 시놀로지 Container Manager → 프로젝트로 가져오기
+# 사용 전 .env 파일을 같은 폴더에 두고 값을 바꾸세요. (.env.example 참고)
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: daily-report-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-daily_report}
+      POSTGRES_USER: ${POSTGRES_USER:-daily}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-db}
+    volumes:
+      # 시놀로지: 공유 폴더를 이 경로에 마운트해도 됩니다
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-daily} -d ${POSTGRES_DB:-daily_report}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: daily-report-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # 왼쪽=NAS에서 열 포트, 오른쪽=컨테이너 내부(바꾸지 마세요)
+      - "${APP_PORT:-3080}:3000"
+    environment:
+      # Cursor 신원은 NAS에서 동작하지 않음 → 로컬 로그인 필수
+      AUTH_MODE: local
+      DATABASE_URL: postgres://${POSTGRES_USER:-daily}:${POSTGRES_PASSWORD:-change-me-db}@db:5432/${POSTGRES_DB:-daily_report}
+      SESSION_SECRET: ${SESSION_SECRET:-please-change-this-session-secret}
+      # 첫 관리자 (앱 최초 기동 시 자동 생성)
+      BOOTSTRAP_MANAGER_EMAIL: ${BOOTSTRAP_MANAGER_EMAIL:-admin@example.com}
+      BOOTSTRAP_MANAGER_PASSWORD: ${BOOTSTRAP_MANAGER_PASSWORD:-change-me-admin}
+      BOOTSTRAP_MANAGER_NAME: ${BOOTSTRAP_MANAGER_NAME:-관리자}
+      # 직원이 계정 만들 때 쓰는 공유 초대 코드(선택, 계속 재사용 가능)
+      INVITE_CODE: ${INVITE_CODE:-welcome}
+      # HTTPS 리버스 프록시 뒤에 둘 때만 true
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+
+volumes:
+  db_data:

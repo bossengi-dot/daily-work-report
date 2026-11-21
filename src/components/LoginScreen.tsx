@@ -1,18 +1,44 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 
+type LocalTab = 'login' | 'register' | 'join'
+
 export function LoginScreen() {
-  const { session, authError, submitJoinApplication, refresh } = useStore()
+  const {
+    session,
+    authError,
+    authMode,
+    submitJoinApplication,
+    refresh,
+    localLogin,
+    localRegister,
+  } = useStore()
+  const [tab, setTab] = useState<LocalTab>('login')
   const [applyName, setApplyName] = useState(session?.displayName ?? '')
   const [applyDept, setApplyDept] = useState('')
   const [applyMemo, setApplyMemo] = useState('')
   const [applyDone, setApplyDone] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+
+  useEffect(() => {
+    if (session?.displayName) setApplyName(session.displayName)
+  }, [session?.displayName])
+
+  useEffect(() => {
+    if (session && !session.role) setTab('join')
+  }, [session])
 
   const doApply = async () => {
     setBusy(true)
+    setFormError(null)
     const ok = await submitJoinApplication({
       name: applyName,
       dept: applyDept,
@@ -23,10 +49,176 @@ export function LoginScreen() {
       setApplyDone(true)
       setApplyDept('')
       setApplyMemo('')
+    } else {
+      setFormError('가입 신청에 실패했습니다. 입력값을 확인해 주세요.')
     }
   }
 
-  if (authError) {
+  const doLogin = async () => {
+    setBusy(true)
+    setFormError(null)
+    const result = await localLogin(email, password)
+    setBusy(false)
+    if (!result.ok) {
+      setFormError(result.message ?? '로그인에 실패했습니다.')
+    }
+  }
+
+  const doRegister = async () => {
+    setBusy(true)
+    setFormError(null)
+    const result = await localRegister({
+      email,
+      password,
+      displayName,
+      inviteCode,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      setFormError(result.message ?? '가입에 실패했습니다.')
+      return
+    }
+    setTab('join')
+  }
+
+  if (authMode === 'local' && !session) {
+    return (
+      <div className="login-page">
+        <div className="login-card panel">
+          <div className="brand" style={{ marginBottom: 8 }}>
+            <div className="brand-mark" style={{ width: 36, height: 36 }}>
+              일
+            </div>
+            <div>
+              <strong style={{ fontSize: 18 }}>일일업무보고</strong>
+              <div className="hint">NAS 로컬 로그인 (이메일·비밀번호)</div>
+            </div>
+          </div>
+
+          <div className="login-tabs">
+            <button
+              type="button"
+              className={tab === 'login' ? 'active' : ''}
+              onClick={() => {
+                setTab('login')
+                setFormError(null)
+              }}
+            >
+              로그인
+            </button>
+            <button
+              type="button"
+              className={tab === 'register' ? 'active' : ''}
+              onClick={() => {
+                setTab('register')
+                setFormError(null)
+              }}
+            >
+              계정 만들기
+            </button>
+          </div>
+
+          {formError && (
+            <p style={{ marginTop: 12, color: 'var(--danger, #b42318)' }}>{formError}</p>
+          )}
+
+          {tab === 'login' && (
+            <>
+              <div className="field" style={{ marginTop: 12 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>이메일</label>
+                <input
+                  type="email"
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                />
+              </div>
+              <div className="field" style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>비밀번호</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void doLogin()
+                  }}
+                  placeholder="비밀번호"
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%', marginTop: 12 }}
+                disabled={busy}
+                onClick={() => void doLogin()}
+              >
+                로그인
+              </button>
+              <p className="hint" style={{ marginTop: 10 }}>
+                첫 관리자는 docker-compose의 BOOTSTRAP_MANAGER_EMAIL / PASSWORD 로
+                로그인하세요.
+              </p>
+            </>
+          )}
+
+          {tab === 'register' && (
+            <>
+              <div className="field" style={{ marginTop: 12 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>이름</label>
+                <input
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="홍길동"
+                />
+              </div>
+              <div className="field" style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>이메일</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                />
+              </div>
+              <div className="field" style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>비밀번호 (8자 이상)</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="비밀번호"
+                />
+              </div>
+              <div className="field" style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>초대 코드 *</label>
+                <input
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  placeholder="관리자에게 받은 코드"
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%', marginTop: 12 }}
+                disabled={busy}
+                onClick={() => void doRegister()}
+              >
+                계정 만들기
+              </button>
+              <p className="hint" style={{ marginTop: 10 }}>
+                계정 만든 뒤 가입 신청 → 관리자 승인 후 이용합니다.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (authError && authMode !== 'local') {
     return (
       <div className="login-page">
         <div className="login-card panel">
@@ -62,7 +254,11 @@ export function LoginScreen() {
           </div>
           <div>
             <strong style={{ fontSize: 18 }}>일일업무보고</strong>
-            <div className="hint">Cursor 계정으로 인증됩니다</div>
+            <div className="hint">
+              {authMode === 'local'
+                ? '로컬 계정 · 역할 배정 대기'
+                : 'Cursor 계정으로 인증됩니다'}
+            </div>
           </div>
         </div>
 
@@ -77,6 +273,10 @@ export function LoginScreen() {
               </div>
             )}
           </div>
+        )}
+
+        {formError && (
+          <p style={{ marginBottom: 8, color: 'var(--danger, #b42318)' }}>{formError}</p>
         )}
 
         {applyDone ? (
@@ -97,8 +297,9 @@ export function LoginScreen() {
         ) : (
           <>
             <p className="hint" style={{ marginTop: 0, marginBottom: 8 }}>
-              아직 역할이 없습니다. 이름·부서로 가입을 신청하거나, 첫 사용자라면 자동으로
-              관리자가 됩니다(새로고침).
+              아직 역할이 없습니다. 이름·부서로 가입을 신청하세요.
+              {authMode !== 'local' &&
+                ' (첫 Cursor 사용자는 자동 관리자 — 새로고침)'}
             </p>
             <div className="field" style={{ marginTop: 8 }}>
               <label style={{ fontSize: 12, fontWeight: 600 }}>이름 *</label>

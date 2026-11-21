@@ -28,10 +28,12 @@ function statusBadge(status: JoinAppStatus) {
 export function JoinAdminScreen() {
   const {
     state,
+    authMode,
     approveJoinApplication,
     rejectJoinApplication,
     cancelJoinApplication,
     registerEmployeeDirect,
+    createInviteCode,
   } = useStore()
 
   const [filter, setFilter] = useState<JoinAppStatus | 'all'>('pending')
@@ -39,6 +41,7 @@ export function JoinAdminScreen() {
   const [rejectReason, setRejectReason] = useState('')
   const [directName, setDirectName] = useState('')
   const [directDept, setDirectDept] = useState('')
+  const [lastInvite, setLastInvite] = useState<string | null>(null)
 
   const list = useMemo(() => {
     const apps = state.joinApplications
@@ -73,10 +76,39 @@ export function JoinAdminScreen() {
         <div>
           <h1>가입신청</h1>
           <p>
-            대기 {pendingCount}건 · 승인 시 Cursor 계정이 직원 역할로 연결됩니다.
+            대기 {pendingCount}건 ·{' '}
+            {authMode === 'local'
+              ? '승인 시 로컬 계정이 직원 역할로 연결됩니다.'
+              : '승인 시 Cursor 계정이 직원 역할로 연결됩니다.'}
           </p>
         </div>
       </div>
+
+      {authMode === 'local' && (
+        <div className="panel panel-pad" style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>직원 초대 코드</div>
+          <p className="hint" style={{ marginTop: 0 }}>
+            새 직원이 「계정 만들기」할 때 입력할 1회용 코드를 만듭니다. (공유 INVITE_CODE
+            환경변수도 계속 사용 가능)
+          </p>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => {
+              void createInviteCode().then((r) => {
+                if (r.ok && r.code) setLastInvite(r.code)
+              })
+            }}
+          >
+            초대 코드 만들기
+          </button>
+          {lastInvite && (
+            <p style={{ marginTop: 10, fontWeight: 600 }}>
+              새 코드: <code>{lastInvite}</code>
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="stack" style={{ gap: 16 }}>
         <section className="panel panel-pad">

@@ -1,6 +1,15 @@
 import { requireIdentity, type VerifiedIdentity } from '../../cursor/identity'
 import { sql } from '../lib/db'
 import type { SessionRole } from '../types'
+import {
+  accountToIdentity,
+  authMode,
+  ensureBootstrapManager,
+  findAccountById,
+  LOCAL_SESSION_COOKIE,
+  parseCookieHeader,
+  verifySessionCookie,
+} from './localAuth'
 
 export type AppStage = 'production' | 'preview'
 
@@ -22,15 +31,39 @@ export type ViewerSession = {
   simulated: boolean
   needsJoin: boolean
   kind: 'person' | 'key'
+  authMode: 'cursor' | 'local'
 }
 
 export async function requireViewer(
   request: Request,
 ): Promise<VerifiedIdentity | Response> {
+  if (authMode() === 'local') {
+    await ensureBootstrapManager('production')
+    const raw = parseCookieHeader(
+      request.headers.get('cookie'),
+      LOCAL_SESSION_COOKIE,
+    )
+    const parsed = verifySessionCookie(raw)
+    if (!parsed) {
+      return Response.json(
+        { error: 'unauthorized', reason: 'missing_local_session', authMode: 'local' },
+        { status: 401, headers: { 'cache-control': 'private, no-store' } },
+      )
+    }
+    const account = await findAccountById(parsed.sub)
+    if (!account) {
+      return Response.json(
+        { error: 'unauthorized', reason: 'unknown_account', authMode: 'local' },
+        { status: 401, headers: { 'cache-control': 'private, no-store' } },
+      )
+    }
+    return accountToIdentity(account)
+  }
   return requireIdentity(request)
 }
 
 export function stageOf(identity: VerifiedIdentity): AppStage {
+  if (authMode() === 'local') return 'production'
   return identity.stage === 'preview' ? 'preview' : 'production'
 }
 
@@ -90,7 +123,8 @@ export async function resolveViewerSession(
     identity.name?.trim() || identity.email?.trim() || '사용자'
   let roleRow = await loadRole(stage, identity.sub)
 
-  if (!roleRow && identity.kind === 'person') {
+  // Local mode: manager is created via BOOTSTRAP_MANAGER_* only (no auto first-login).
+  if (!roleRow && identity.kind === 'person' && authMode() !== 'local') {
     const managers = await countManagers(stage)
     if (managers === 0) {
       roleRow = await upsertRole({
@@ -113,6 +147,7 @@ export async function resolveViewerSession(
     simulated: Boolean(identity.simulated),
     needsJoin: !roleRow,
     kind: identity.kind,
+    authMode: authMode(),
   }
 }
 

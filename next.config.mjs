@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   serverExternalPackages: ['@electric-sql/pglite'],
   webpack: (config) => {
     config.resolve.extensionAlias = {

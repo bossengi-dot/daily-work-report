@@ -10,7 +10,7 @@ import { WeeklySummary } from './components/WeeklySummary'
 import { useStore } from './store'
 
 export default function App() {
-  const { ready, view, setView, state, toast, session, logout } = useStore()
+  const { ready, view, setView, state, toast, session, logout, authMode } = useStore()
 
   if (!ready) {
     return (
@@ -83,7 +83,7 @@ export default function App() {
             <div className="hint">{session.displayName}</div>
             {session.simulated && <div className="hint">시뮬 뷰어</div>}
             <button type="button" className="ghost-btn" onClick={logout}>
-              안내
+              {authMode === 'local' ? '로그아웃' : '안내'}
             </button>
           </div>
         </aside>
@@ -136,7 +136,7 @@ export default function App() {
             <span>{state.currentDate}</span>
             {!isManager && (
               <button type="button" className="ghost-btn" onClick={logout}>
-                안내
+                {authMode === 'local' ? '로그아웃' : '안내'}
               </button>
             )}
           </div>

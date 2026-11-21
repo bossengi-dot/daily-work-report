@@ -44,6 +44,7 @@ type ActionResponse = {
 interface StoreValue {
   ready: boolean
   authError: string | null
+  authMode: 'cursor' | 'local'
   state: AppState
   session: Session | null
   view: RoleView
@@ -55,6 +56,17 @@ interface StoreValue {
   refresh: () => Promise<void>
   resetSeed: () => Promise<void>
   logout: () => void
+  localLogin: (
+    email: string,
+    password: string,
+  ) => Promise<{ ok: boolean; message?: string }>
+  localRegister: (input: {
+    email: string
+    password: string
+    displayName: string
+    inviteCode: string
+  }) => Promise<{ ok: boolean; message?: string }>
+  createInviteCode: () => Promise<{ ok: boolean; code?: string; message?: string }>
   getReport: (employeeId: string, date?: string) => DailyReport | undefined
   updateReport: (reportId: string, patch: Partial<DailyReport>) => Promise<void>
   saveDraft: (reportId: string) => Promise<void>
@@ -125,6 +137,7 @@ async function postAction(action: ClientAction): Promise<ActionResponse> {
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [authMode, setAuthMode] = useState<'cursor' | 'local'>('cursor')
   const [state, setState] = useState<AppState>(() => createSeed())
   const [session, setSession] = useState<Session | null>(null)
   const [view, setView] = useState<RoleView>('employee')
@@ -141,6 +154,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const applySession = useCallback((s: Session) => {
     setSession(s)
+    if (s.authMode) setAuthMode(s.authMode)
     if (s.role === 'manager') {
       setView('manager')
     } else if (s.role === 'employee') {
@@ -150,9 +164,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refresh = useCallback(async () => {
+    try {
+      const modeRes = await fetch('/api/auth/mode', { cache: 'no-store' })
+      if (modeRes.ok) {
+        const modeData = (await modeRes.json()) as { mode?: 'cursor' | 'local' }
+        if (modeData.mode === 'local' || modeData.mode === 'cursor') {
+          setAuthMode(modeData.mode)
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     const res = await fetch('/api/state', { cache: 'no-store' })
     if (res.status === 401) {
-      setAuthError('로그인이 필요합니다. Cursor 계정으로 앱을 열어 주세요.')
+      let local = false
+      try {
+        const body = (await res.clone().json()) as { authMode?: string }
+        local = body.authMode === 'local'
+      } catch {
+        /* ignore */
+      }
+      if (local) {
+        setAuthMode('local')
+        setAuthError(null)
+      } else {
+        setAuthError('로그인이 필요합니다. Cursor 계정으로 앱을 열어 주세요.')
+      }
       setSession(null)
       setReady(true)
       return
@@ -192,9 +230,96 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [applySession, showToast],
   )
 
-  const logout = useCallback(() => {
-    showToast('Cursor 앱 접근을 종료하려면 창을 닫아 주세요. (서버 역할은 유지됩니다)')
+  const localLogin = useCallback(
+    async (email: string, password: string) => {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const data = (await res.json()) as {
+        ok?: boolean
+        session?: Session
+        error?: string
+        message?: string
+      }
+      if (!res.ok || !data.ok || !data.session) {
+        return {
+          ok: false,
+          message:
+            data.message ??
+            (data.error === 'invalid_credentials'
+              ? '이메일 또는 비밀번호가 올바르지 않습니다.'
+              : '로그인에 실패했습니다.'),
+        }
+      }
+      applySession(data.session)
+      setAuthError(null)
+      await refresh()
+      return { ok: true }
+    },
+    [applySession, refresh],
+  )
+
+  const localRegister = useCallback(
+    async (input: {
+      email: string
+      password: string
+      displayName: string
+      inviteCode: string
+    }) => {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      const data = (await res.json()) as {
+        ok?: boolean
+        session?: Session
+        error?: string
+        message?: string
+      }
+      if (!res.ok || !data.ok || !data.session) {
+        return {
+          ok: false,
+          message: data.message ?? '가입에 실패했습니다.',
+        }
+      }
+      applySession(data.session)
+      setAuthError(null)
+      await refresh()
+      return { ok: true }
+    },
+    [applySession, refresh],
+  )
+
+  const createInviteCode = useCallback(async () => {
+    const res = await fetch('/api/auth/invite', { method: 'POST' })
+    const data = (await res.json()) as {
+      ok?: boolean
+      code?: string
+      error?: string
+      message?: string
+    }
+    if (!res.ok || !data.ok || !data.code) {
+      return { ok: false, message: data.message ?? '초대 코드 생성 실패' }
+    }
+    showToast(`초대 코드: ${data.code}`)
+    return { ok: true, code: data.code }
   }, [showToast])
+
+  const logout = useCallback(() => {
+    if (authMode === 'local') {
+      void (async () => {
+        await fetch('/api/auth/logout', { method: 'POST' })
+        setSession(null)
+        setAuthError(null)
+        showToast('로그아웃했습니다.')
+      })()
+      return
+    }
+    showToast('Cursor 앱 접근을 종료하려면 창을 닫아 주세요. (서버 역할은 유지됩니다)')
+  }, [authMode, showToast])
 
   const getReport = useCallback(
     (employeeId: string, date?: string) => {
@@ -423,6 +548,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       authError,
+      authMode,
       state,
       session,
       view,
@@ -434,6 +560,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refresh,
       resetSeed,
       logout,
+      localLogin,
+      localRegister,
+      createInviteCode,
       getReport,
       updateReport,
       saveDraft,
@@ -465,6 +594,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [
       ready,
       authError,
+      authMode,
       state,
       session,
       view,
@@ -474,6 +604,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refresh,
       resetSeed,
       logout,
+      localLogin,
+      localRegister,
+      createInviteCode,
       getReport,
       updateReport,
       saveDraft,

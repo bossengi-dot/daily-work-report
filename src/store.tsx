@@ -107,7 +107,8 @@ interface StoreValue {
   saveDraft: (reportId: string) => void
   submitReport: (reportId: string) => void
   submitPlan: (reportId: string) => void
-  submitExecution: (reportId: string) => void
+  /** returns false + first blocker item id when validation fails */
+  submitExecution: (reportId: string) => { ok: boolean; blockerItemId?: string }
   checkPlanItem: (reportId: string, planItemId: string) => void
   addPlanItem: (reportId: string, text: string) => void
   addAdHocExecution: (reportId: string, text: string) => void
@@ -284,17 +285,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const submitExecution = useCallback(
-    (reportId: string) => {
+    (reportId: string): { ok: boolean; blockerItemId?: string } => {
       const report = state.reports.find((r) => r.id === reportId)
-      if (!report) return
+      if (!report) return { ok: false }
       const emp = state.employees.find((e) => e.id === report.employeeId)
       if (emp?.ooo && state.currentDate >= emp.ooo.start && state.currentDate <= emp.ooo.end) {
         showToast('부재 기간에는 제출이 면제됩니다.')
-        return
+        return { ok: false }
       }
       if (!report.planSubmittedAt && !report.submittedAt) {
         showToast('먼저 오전 계획을 제출해 주세요.')
-        return
+        return { ok: false }
       }
       const blockers = [...report.execution, ...report.carryover].filter(
         (i) => i.status === 'blocker',
@@ -302,7 +303,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       for (const b of blockers) {
         if (!b.blockerReason?.trim()) {
           showToast('블로커 항목에 사유를 입력해 주세요.')
-          return
+          return { ok: false, blockerItemId: b.id }
         }
       }
       const stamp = nowStamp(state.currentDate)
@@ -313,6 +314,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         managerAck: null,
       })
       showToast('실행·이월을 마감 제출했습니다.')
+      return { ok: true }
     },
     [state.reports, state.employees, state.currentDate, updateReport, showToast],
   )
@@ -516,9 +518,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         showToast(`${emp.name}은(는) 부재 중이라 리마인드를 보내지 않습니다.`)
         return
       }
-      showToast(`${emp?.name ?? '직원'}에게 제출 리마인드를 보냈습니다.`)
+      const report = state.reports.find(
+        (r) => r.employeeId === employeeId && r.date === state.currentDate,
+      )
+      const morningOnly =
+        report &&
+        (report.planSubmittedAt || report.submittedAt) &&
+        !report.execSubmittedAt &&
+        report.status !== 'submitted' &&
+        report.status !== 'reviewing' &&
+        report.status !== 'done'
+      const msg = morningOnly
+        ? `${emp?.name ?? '직원'}에게 저녁 마감 독촉을 보냈습니다.`
+        : `${emp?.name ?? '직원'}에게 오늘 보고 독촉을 보냈습니다.`
+      showToast(msg)
     },
-    [state.employees, state.currentDate, showToast],
+    [state.employees, state.reports, state.currentDate, showToast],
   )
 
   const leaveInstruction = useCallback(

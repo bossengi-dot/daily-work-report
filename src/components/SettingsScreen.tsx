@@ -10,6 +10,7 @@ export function SettingsScreen() {
     setActingAsEmployeeId,
     session,
     showToast,
+    resetSeed,
   } = useStore()
 
   const targetId =
@@ -191,6 +192,18 @@ export function SettingsScreen() {
             로컬 파일 첨부는 object URL로 미리보기만 제공합니다. localStorage에는 파일명·크기·MIME
             메타만 남고, 바이너리는 저장하지 않습니다. 새로고침 시 미리보기 URL은 만료됩니다.
           </p>
+        </section>
+
+        <section className="panel panel-pad">
+          <div className="section-title">
+            <h2>데모 데이터</h2>
+          </div>
+          <p className="hint" style={{ marginBottom: 10 }}>
+            시드 v4(직원 10명·5영업일)로 초기화합니다. 연동 설정·세션은 유지됩니다.
+          </p>
+          <button type="button" className="btn btn-outline" onClick={resetSeed}>
+            시드 리셋
+          </button>
         </section>
       </div>
     </div>

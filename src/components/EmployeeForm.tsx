@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { tryPushWebhook } from '../lib/integrations'
 import { composeChatSummary } from '../lib/pushMessage'
+import { employeeStatusLabel } from '../lib/statusLabels'
 import { useStore } from '../store'
 import {
   isEveningDone,
@@ -9,17 +10,6 @@ import {
   type ItemStatus,
   type WorkItem,
 } from '../types'
-
-function StatusBadge({ status }: { status?: ItemStatus }) {
-  if (!status) return null
-  const map = {
-    done: ['완료', 'badge-done'],
-    in_progress: ['진행', 'badge-progress'],
-    blocker: ['블로커', 'badge-blocker'],
-  } as const
-  const [label, cls] = map[status]
-  return <span className={`badge ${cls}`}>{label}</span>
-}
 
 function CarryBadge({ days }: { days?: number }) {
   if (!days || days < 1) return null
@@ -46,6 +36,109 @@ function AttachmentList({ items }: { items: WorkItem['attachments'] }) {
   )
 }
 
+function StatusSegment({
+  value,
+  onChange,
+}: {
+  value: ItemStatus
+  onChange: (s: ItemStatus) => void
+}) {
+  const opts: { v: ItemStatus; label: string }[] = [
+    { v: 'done', label: '완료' },
+    { v: 'in_progress', label: '진행' },
+    { v: 'blocker', label: '블로커' },
+  ]
+  return (
+    <div className="seg" role="group" aria-label="상태">
+      {opts.map((o) => (
+        <button
+          key={o.v}
+          type="button"
+          className={`seg-btn ${value === o.v ? `on on-${o.v}` : ''}`}
+          onClick={() => onChange(o.v)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function AttachPopover({
+  reportId,
+  section,
+  itemId,
+  attachments,
+}: {
+  reportId: string
+  section: 'execution' | 'carryover'
+  itemId: string
+  attachments: WorkItem['attachments']
+}) {
+  const { addAttachmentUrl, addLocalFileAttachment } = useStore()
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  return (
+    <div className="attach-pop" ref={ref}>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen((o) => !o)}>
+        ⋯ 첨부{attachments.length ? ` (${attachments.length})` : ''}
+      </button>
+      {open && (
+        <div className="attach-pop-panel">
+          <AttachmentList items={attachments} />
+          <div className="attach-pop-row">
+            <input
+              placeholder="URL…"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  addAttachmentUrl(reportId, section, itemId, url)
+                  setUrl('')
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                addAttachmentUrl(reportId, section, itemId, url)
+                setUrl('')
+              }}
+            >
+              URL
+            </button>
+            <label className="btn btn-ghost btn-sm file-label">
+              파일
+              <input
+                type="file"
+                accept="image/*,.pdf,.txt,.doc,.docx"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) addLocalFileAttachment(reportId, section, itemId, f)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function EmployeeForm() {
   const {
     state,
@@ -55,8 +148,6 @@ export function EmployeeForm() {
     addPlanItem,
     addAdHocExecution,
     updateWorkItem,
-    addAttachmentUrl,
-    addLocalFileAttachment,
     setInstructionReflect,
     updateReport,
     saveDraft,
@@ -69,38 +160,73 @@ export function EmployeeForm() {
   const report = getReport(actingAsEmployeeId)
   const [planDraft, setPlanDraft] = useState('')
   const [adHocDraft, setAdHocDraft] = useState('')
-  const [urlDrafts, setUrlDrafts] = useState<Record<string, string>>({})
   const [pushOpen, setPushOpen] = useState(false)
   const [pushing, setPushing] = useState(false)
+  const [moreMenu, setMoreMenu] = useState(false)
+  const [highlightBlockerId, setHighlightBlockerId] = useState<string | null>(null)
+  const [planCollapsed, setPlanCollapsed] = useState(false)
+  const [execCollapsed, setExecCollapsed] = useState(false)
+  const instrRef = useRef<HTMLDivElement>(null)
 
   const pushText = useMemo(() => {
     if (!employee || !report) return ''
     return composeChatSummary(employee, report)
   }, [employee, report])
 
+  const morning = report ? isMorningDone(report) : false
+  const evening = report ? isEveningDone(report) : false
+
+  useEffect(() => {
+    // collapse inactive phase by default once morning done
+    if (morning && !evening) {
+      setPlanCollapsed(true)
+      setExecCollapsed(false)
+    } else if (!morning) {
+      setPlanCollapsed(false)
+      setExecCollapsed(true)
+    } else {
+      setPlanCollapsed(false)
+      setExecCollapsed(false)
+    }
+  }, [morning, evening, actingAsEmployeeId])
+
   if (!employee || !report) {
     return <div className="empty">선택한 담당자의 당일 보고서가 없습니다.</div>
   }
 
-  const statusLabel: Record<string, string> = {
-    draft: '임시저장',
-    submitted: '제출됨',
-    reviewing: '검토중',
-    done: '완료',
-    revision: '보완요청',
-  }
-  const morning = isMorningDone(report)
-  const evening = isEveningDone(report)
   const ooo = isOooOn(employee, state.currentDate)
+  const unreflected = report.instructions.filter((i) => i.reflect === 'unreflected')
+  const phase: 'morning' | 'evening' | 'done' = evening
+    ? 'done'
+    : morning
+      ? 'evening'
+      : 'morning'
+  const missingBlockerReason = [...report.execution, ...report.carryover].some(
+    (i) => i.status === 'blocker' && !i.blockerReason?.trim(),
+  )
+
+  const handleExecSubmit = () => {
+    const result = submitExecution(report.id)
+    if (!result.ok && result.blockerItemId) {
+      setHighlightBlockerId(result.blockerItemId)
+      requestAnimationFrame(() => {
+        const el = document.querySelector(
+          `[data-blocker-item="${result.blockerItemId}"]`,
+        )
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+      window.setTimeout(() => setHighlightBlockerId(null), 2800)
+    }
+  }
 
   return (
-    <div className="page">
+    <div className="page page-employee">
       <div className="page-header">
         <div>
           <h1>일일업무보고</h1>
           <p>
-            담당자: {employee.name} · {employee.dept} · {state.currentDate} ·{' '}
-            {statusLabel[report.status]}
+            {employee.name} · {employee.dept} · {state.currentDate} ·{' '}
+            {employeeStatusLabel(report)}
           </p>
         </div>
       </div>
@@ -112,11 +238,25 @@ export function EmployeeForm() {
         </div>
       )}
 
+      {unreflected.length > 0 && (
+        <button
+          type="button"
+          className="sticky-chip"
+          onClick={() => instrRef.current?.scrollIntoView({ behavior: 'smooth' })}
+        >
+          미반영 지시 {unreflected.length}
+        </button>
+      )}
+
+      {report.status === 'revision' && report.revisionNote && (
+        <div className="revision-banner">보완요청: {report.revisionNote}</div>
+      )}
+
       <div className="step-bar panel panel-pad">
         <div className={`step ${morning ? 'done' : 'active'}`}>
           <span className="step-num">1</span>
           <div>
-            <strong>오전 계획 제출</strong>
+            <strong>오전 계획</strong>
             <div className="hint">
               {report.planSubmittedAt ? `제출 ${report.planSubmittedAt}` : '계획 작성 후 제출'}
             </div>
@@ -126,157 +266,144 @@ export function EmployeeForm() {
         <div className={`step ${evening ? 'done' : morning ? 'active' : ''}`}>
           <span className="step-num">2</span>
           <div>
-            <strong>저녁 실행·이월 마감</strong>
+            <strong>저녁 마감</strong>
             <div className="hint">
               {report.execSubmittedAt
                 ? `마감 ${report.execSubmittedAt}`
                 : morning
-                  ? '실행·이월 기록 후 마감'
-                  : '오전 제출 후 진행'}
+                  ? '실행·이월 후 마감'
+                  : '오전 제출 후'}
             </div>
           </div>
         </div>
       </div>
 
-      {report.status === 'revision' && report.revisionNote && (
-        <div className="revision-banner">
-          보완요청: {report.revisionNote}
-        </div>
-      )}
-
       <div className="employee-layout">
         <div className="stack">
           {/* Plan */}
-          <section className="panel panel-pad">
+          <section
+            className={`panel panel-pad phase-panel ${phase === 'morning' ? 'active-phase' : ''} ${planCollapsed ? 'collapsed' : ''}`}
+          >
             <div className="section-title">
               <h2>
                 계획{' '}
-                <span className="hint">계획 항목을 체크하면 실행으로 자동 이동합니다.</span>
+                <span className="hint" title="체크 시 실행으로 이동">
+                  ⓘ
+                </span>
               </h2>
-              <span className="hint">전체 {report.plan.length}개</span>
-            </div>
-            {report.plan.length === 0 && (
-              <div className="empty" style={{ padding: 12 }}>
-                남은 계획 없음 — 체크한 항목은 실행으로 이동했습니다.
+              <div className="section-actions">
+                <span className="hint">{report.plan.length}개</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setPlanCollapsed((c) => !c)}
+                >
+                  {planCollapsed ? '펼치기' : '접기'}
+                </button>
               </div>
-            )}
-            {report.plan.map((item) => (
-              <div className="item-row" key={item.id}>
-                <input
-                  type="checkbox"
-                  aria-label={`${item.text} 실행으로 이동`}
-                  onChange={() => checkPlanItem(report.id, item.id)}
-                />
-                <div>
-                  <div className="item-text">{item.text}</div>
-                  <div className="item-meta">
-                    <AttachmentList items={item.attachments} />
-                    {item.hours != null && <span className="hours">{item.hours}h</span>}
+            </div>
+            {!planCollapsed && (
+              <>
+                {report.plan.length === 0 && (
+                  <div className="empty" style={{ padding: 12 }}>
+                    남은 계획 없음
                   </div>
+                )}
+                {report.plan.map((item) => (
+                  <div className="item-row" key={item.id}>
+                    <input
+                      type="checkbox"
+                      aria-label={`${item.text} 실행으로 이동`}
+                      onChange={() => checkPlanItem(report.id, item.id)}
+                    />
+                    <div>
+                      <div className="item-text">{item.text}</div>
+                      <div className="item-meta">
+                        <AttachmentList items={item.attachments} />
+                        {item.hours != null && <span className="hours">{item.hours}h</span>}
+                      </div>
+                    </div>
+                    <span className="hours">예정</span>
+                  </div>
+                ))}
+                <div className="add-row">
+                  <input
+                    placeholder="계획 항목 추가…"
+                    value={planDraft}
+                    onChange={(e) => setPlanDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        addPlanItem(report.id, planDraft)
+                        setPlanDraft('')
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    type="button"
+                    onClick={() => {
+                      addPlanItem(report.id, planDraft)
+                      setPlanDraft('')
+                    }}
+                  >
+                    추가
+                  </button>
                 </div>
-                <span className="hours">예정</span>
-              </div>
-            ))}
-            <div className="add-row">
-              <input
-                placeholder="계획 항목 추가…"
-                value={planDraft}
-                onChange={(e) => setPlanDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    addPlanItem(report.id, planDraft)
-                    setPlanDraft('')
-                  }
-                }}
-              />
-              <button
-                className="btn btn-ghost btn-sm"
-                type="button"
-                onClick={() => {
-                  addPlanItem(report.id, planDraft)
-                  setPlanDraft('')
-                }}
-              >
-                추가
-              </button>
-            </div>
+              </>
+            )}
+            {planCollapsed && (
+              <div className="hint">계획 {report.plan.length}개 · 클릭해 펼치기</div>
+            )}
           </section>
 
           {/* Execution */}
-          <section className="panel panel-pad">
+          <section
+            className={`panel panel-pad phase-panel ${phase === 'evening' || phase === 'done' ? 'active-phase' : ''} ${execCollapsed ? 'collapsed' : ''}`}
+          >
             <div className="section-title">
               <h2>
-                실행 <span className="hint">오늘 수행한 업무를 기록하세요.</span>
+                실행 <span className="hint" title="오늘 수행 기록">ⓘ</span>
               </h2>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setExecCollapsed((c) => !c)}
+              >
+                {execCollapsed ? '펼치기' : '접기'}
+              </button>
             </div>
-            {report.execution.map((item) => (
-              <div key={item.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--slate-100)' }}>
-                <div className="item-row" style={{ border: 'none', padding: 0 }}>
-                  <span />
-                  <div>
+            {!execCollapsed && (
+              <>
+                {report.execution.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`exec-row ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
+                    data-blocker-item={item.status === 'blocker' ? item.id : undefined}
+                  >
                     <div className="item-text">
-                      {item.text}{' '}
-                      {item.isAdHoc && <span className="ad-hoc-tag">계획 외</span>}
+                      {item.text} {item.isAdHoc && <span className="ad-hoc-tag">계획 외</span>}
                     </div>
                     <div className="item-meta">
-                      <StatusBadge status={item.status} />
-                      <AttachmentList items={item.attachments} />
-                      {item.hours != null && <span className="hours">{item.hours}h</span>}
-                    </div>
-                    <div className="item-meta" style={{ marginTop: 8 }}>
-                      <select
-                        className="status-select"
+                      <StatusSegment
                         value={item.status ?? 'in_progress'}
-                        onChange={(e) =>
-                          updateWorkItem(report.id, 'execution', item.id, {
-                            status: e.target.value as ItemStatus,
-                          })
+                        onChange={(s) =>
+                          updateWorkItem(report.id, 'execution', item.id, { status: s })
                         }
-                      >
-                        <option value="done">완료</option>
-                        <option value="in_progress">진행</option>
-                        <option value="blocker">블로커</option>
-                      </select>
-                      <input
-                        style={{ maxWidth: 180, fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--slate-200)' }}
-                        placeholder="첨부 URL…"
-                        value={urlDrafts[item.id] ?? ''}
-                        onChange={(e) =>
-                          setUrlDrafts((d) => ({ ...d, [item.id]: e.target.value }))
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            addAttachmentUrl(report.id, 'execution', item.id, urlDrafts[item.id] ?? '')
-                            setUrlDrafts((d) => ({ ...d, [item.id]: '' }))
-                          }
-                        }}
                       />
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          addAttachmentUrl(report.id, 'execution', item.id, urlDrafts[item.id] ?? '')
-                          setUrlDrafts((d) => ({ ...d, [item.id]: '' }))
-                        }}
-                      >
-                        URL 첨부
-                      </button>
-                      <label className="btn btn-ghost btn-sm file-label">
-                        파일
-                        <input
-                          type="file"
-                          accept="image/*,.pdf,.txt,.doc,.docx"
-                          hidden
-                          onChange={(e) => {
-                            const f = e.target.files?.[0]
-                            if (f) addLocalFileAttachment(report.id, 'execution', item.id, f)
-                            e.target.value = ''
-                          }}
-                        />
-                      </label>
+                      {item.hours != null && <span className="hours">{item.hours}h</span>}
+                      <AttachPopover
+                        reportId={report.id}
+                        section="execution"
+                        itemId={item.id}
+                        attachments={item.attachments}
+                      />
                     </div>
+                    <AttachmentList items={item.attachments} />
                     {item.status === 'blocker' && (
-                      <div className="blocker-box">
+                      <div
+                        className={`blocker-box ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
+                        data-blocker-item={item.id}
+                      >
                         <label>
                           사유 (필수)
                           <input
@@ -287,6 +414,7 @@ export function EmployeeForm() {
                               })
                             }
                             placeholder="왜 막혔는지 한 줄로"
+                            autoFocus={highlightBlockerId === item.id}
                           />
                         </label>
                         <label>
@@ -304,53 +432,69 @@ export function EmployeeForm() {
                       </div>
                     )}
                   </div>
+                ))}
+                <div className="add-row">
+                  <input
+                    placeholder="+ 계획 외 실행…"
+                    value={adHocDraft}
+                    onChange={(e) => setAdHocDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        addAdHocExecution(report.id, adHocDraft)
+                        setAdHocDraft('')
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    type="button"
+                    onClick={() => {
+                      addAdHocExecution(report.id, adHocDraft)
+                      setAdHocDraft('')
+                    }}
+                  >
+                    계획 외
+                  </button>
                 </div>
-              </div>
-            ))}
-            <div className="add-row">
-              <input
-                placeholder="+ 계획 외 실행 추가…"
-                value={adHocDraft}
-                onChange={(e) => setAdHocDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    addAdHocExecution(report.id, adHocDraft)
-                    setAdHocDraft('')
-                  }
-                }}
-              />
-              <button
-                className="btn btn-ghost btn-sm"
-                type="button"
-                onClick={() => {
-                  addAdHocExecution(report.id, adHocDraft)
-                  setAdHocDraft('')
-                }}
-              >
-                계획 외
-              </button>
-            </div>
+              </>
+            )}
           </section>
 
           {/* Carryover */}
-          <section className="panel panel-pad">
+          <section
+            className={`panel panel-pad phase-panel ${phase === 'evening' || phase === 'done' ? 'active-phase' : ''} ${execCollapsed ? 'collapsed' : ''}`}
+          >
             <div className="section-title">
-              <h2>
-                이월 <span className="hint">다음으로 이월된 업무를 관리하세요.</span>
-              </h2>
+              <h2>이월</h2>
             </div>
-            {report.carryover.map((item) => (
-              <div className="item-row" key={item.id}>
-                <span />
-                <div>
+            {!execCollapsed &&
+              report.carryover.map((item) => (
+                <div
+                  className={`exec-row ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
+                  key={item.id}
+                  data-blocker-item={item.status === 'blocker' ? item.id : undefined}
+                >
                   <div className="item-text">{item.text}</div>
                   <div className="item-meta">
                     <CarryBadge days={item.consecutiveDays} />
-                    <StatusBadge status={item.status} />
-                    <AttachmentList items={item.attachments} />
+                    <StatusSegment
+                      value={item.status ?? 'in_progress'}
+                      onChange={(s) =>
+                        updateWorkItem(report.id, 'carryover', item.id, { status: s })
+                      }
+                    />
+                    <AttachPopover
+                      reportId={report.id}
+                      section="carryover"
+                      itemId={item.id}
+                      attachments={item.attachments}
+                    />
                   </div>
                   {item.status === 'blocker' && (
-                    <div className="blocker-box">
+                    <div
+                      className={`blocker-box ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
+                      data-blocker-item={item.id}
+                    >
                       <label>
                         사유
                         <input
@@ -375,64 +519,98 @@ export function EmployeeForm() {
                       </label>
                     </div>
                   )}
-                  <div className="item-meta" style={{ marginTop: 8 }}>
-                    <select
-                      className="status-select"
-                      value={item.status ?? 'in_progress'}
-                      onChange={(e) =>
-                        updateWorkItem(report.id, 'carryover', item.id, {
-                          status: e.target.value as ItemStatus,
-                        })
-                      }
-                    >
-                      <option value="done">완료</option>
-                      <option value="in_progress">진행</option>
-                      <option value="blocker">블로커</option>
-                    </select>
-                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
           </section>
 
-          <div className="form-footer">
+          <div className="form-footer sticky-cta">
             <span className="saved">
-              {report.draftSavedAt
-                ? `마지막 임시저장: ${report.draftSavedAt}`
-                : '아직 임시저장 없음'}
-              {report.planSubmittedAt ? ` · 계획: ${report.planSubmittedAt}` : ''}
-              {report.execSubmittedAt ? ` · 마감: ${report.execSubmittedAt}` : ''}
+              {report.draftSavedAt ? `임시저장 ${report.draftSavedAt}` : ''}
+              {report.planSubmittedAt ? ` · 계획 ${report.planSubmittedAt}` : ''}
+              {report.execSubmittedAt ? ` · 마감 ${report.execSubmittedAt}` : ''}
             </span>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-outline" onClick={() => saveDraft(report.id)}>
+            <div className="cta-group">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => saveDraft(report.id)}
+              >
                 임시저장
               </button>
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => submitPlan(report.id)}
-              >
-                {morning ? '계획 재제출' : '계획 제출'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => submitExecution(report.id)}
-              >
-                실행·이월 마감
-              </button>
+              <div className="more-wrap">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setMoreMenu((m) => !m)}
+                  aria-label="더보기"
+                >
+                  ⋯
+                </button>
+                {moreMenu && (
+                  <div className="more-menu">
+                    {morning && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          submitPlan(report.id)
+                          setMoreMenu(false)
+                        }}
+                      >
+                        계획 재제출
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPushOpen(true)
+                        setMoreMenu(false)
+                        requestAnimationFrame(() =>
+                          document
+                            .getElementById('push-panel')
+                            ?.scrollIntoView({ behavior: 'smooth' }),
+                        )
+                      }}
+                    >
+                      채팅 푸시…
+                    </button>
+                  </div>
+                )}
+              </div>
+              {phase === 'morning' && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => submitPlan(report.id)}
+                >
+                  계획 제출
+                </button>
+              )}
+              {phase === 'evening' && (
+                <button
+                  type="button"
+                  className={`btn btn-primary ${missingBlockerReason ? 'btn-warn-dot' : ''}`}
+                  onClick={handleExecSubmit}
+                >
+                  실행·이월 마감
+                </button>
+              )}
+              {phase === 'done' && (
+                <button type="button" className="btn btn-outline" disabled>
+                  마감 완료
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Sidebar */}
         <aside className="stack">
+          <div ref={instrRef}>
           <section className="panel panel-pad">
             <div className="section-title">
               <h2>사장 지시</h2>
             </div>
             <p className="hint" style={{ marginTop: -6, marginBottom: 12 }}>
-              오늘 지시사항 반영 여부를 기록하세요.
+              반영 여부를 기록하세요.
             </p>
             {report.instructions.length === 0 && (
               <div className="empty" style={{ padding: 8 }}>
@@ -440,7 +618,7 @@ export function EmployeeForm() {
               </div>
             )}
             {report.instructions.map((ins) => (
-              <div className="instruction-card" key={ins.id}>
+              <div className="instruction-card" key={ins.id} id={`instr-${ins.id}`}>
                 <div className="date">{ins.date}</div>
                 <div className="text">{ins.text}</div>
                 <div className="reflect-toggle">
@@ -462,6 +640,7 @@ export function EmployeeForm() {
               </div>
             ))}
           </section>
+          </div>
 
           <section className="panel panel-pad">
             <div className="section-title">
@@ -469,32 +648,31 @@ export function EmployeeForm() {
             </div>
             <div className="field">
               <textarea
-                rows={4}
-                placeholder="필요 시 메모를 남겨주세요."
+                rows={3}
+                placeholder="필요 시 메모"
                 value={report.memo}
                 onChange={(e) => updateReport(report.id, { memo: e.target.value })}
               />
             </div>
           </section>
 
-          <section className="panel panel-pad">
+          <section className="panel panel-pad" id="push-panel">
             <div className="section-title">
-              <h2>채팅 푸시 초안</h2>
+              <h2>채팅 푸시</h2>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setPushOpen((o) => !o)}
+              >
+                {pushOpen ? '접기' : '펼치기'}
+              </button>
             </div>
-            <p className="hint" style={{ marginTop: -4, marginBottom: 10 }}>
-              웹훅 설정 시 POST 시도 · 없거나 실패 시 복사 폴백
-            </p>
-            <button
-              type="button"
-              className="btn btn-outline"
-              style={{ width: '100%', marginBottom: 8 }}
-              onClick={() => setPushOpen((o) => !o)}
-            >
-              {pushOpen ? '미리보기 닫기' : '메시지 미리보기'}
-            </button>
             {pushOpen && (
               <>
-                <textarea className="push-preview" rows={12} readOnly value={pushText} />
+                <p className="hint" style={{ marginBottom: 8 }}>
+                  웹훅 설정 시 POST · 실패 시 복사 폴백
+                </p>
+                <textarea className="push-preview" rows={10} readOnly value={pushText} />
                 <button
                   type="button"
                   className="btn btn-primary"

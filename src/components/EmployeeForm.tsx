@@ -1,5 +1,7 @@
+'use client'
+
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { tryPushWebhook } from '../lib/integrations'
+import { isSafeAttachmentUrl } from '../lib/safeUrl'
 import { composeChatSummary } from '../lib/pushMessage'
 import { employeeStatusLabel } from '../lib/statusLabels'
 import { useStore } from '../store'
@@ -21,17 +23,26 @@ function AttachmentList({ items }: { items: WorkItem['attachments'] }) {
   if (!items.length) return null
   return (
     <>
-      {items.map((a) => (
-        <span key={a.id} className="att-wrap">
-          {a.kind === 'image' && a.url.startsWith('blob:') && (
-            <img src={a.url} alt={a.label} className="att-thumb" />
-          )}
-          <a className="att-chip" href={a.url} target="_blank" rel="noreferrer">
-            {a.kind === 'image' ? '🖼' : a.kind === 'file' ? '📎' : '🔗'} {a.label}
-            {a.localMeta ? ' · 로컬' : ''}
-          </a>
-        </span>
-      ))}
+      {items.map((a) => {
+        const safe = isSafeAttachmentUrl(a.url)
+        return (
+          <span key={a.id} className="att-wrap">
+            {a.kind === 'image' && a.url.startsWith('blob:') && (
+              <img src={a.url} alt={a.label} className="att-thumb" />
+            )}
+            {safe ? (
+              <a className="att-chip" href={a.url} target="_blank" rel="noreferrer">
+                {a.kind === 'image' ? '이미지' : a.kind === 'file' ? '파일' : '링크'} {a.label}
+                {a.localMeta ? ' · 로컬' : ''}
+              </a>
+            ) : (
+              <span className="att-chip" title="안전하지 않은 링크">
+                차단됨 {a.label}
+              </span>
+            )}
+          </span>
+        )
+      })}
     </>
   )
 }
@@ -206,17 +217,18 @@ export function EmployeeForm() {
   )
 
   const handleExecSubmit = () => {
-    const result = submitExecution(report.id)
-    if (!result.ok && result.blockerItemId) {
-      setHighlightBlockerId(result.blockerItemId)
-      requestAnimationFrame(() => {
-        const el = document.querySelector(
-          `[data-blocker-item="${result.blockerItemId}"]`,
-        )
-        el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      })
-      window.setTimeout(() => setHighlightBlockerId(null), 2800)
-    }
+    void submitExecution(report.id).then((result) => {
+      if (!result.ok && result.blockerItemId) {
+        setHighlightBlockerId(result.blockerItemId)
+        requestAnimationFrame(() => {
+          const el = document.querySelector(
+            `[data-blocker-item="${result.blockerItemId}"]`,
+          )
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        })
+        window.setTimeout(() => setHighlightBlockerId(null), 2800)
+      }
+    })
   }
 
   return (
@@ -670,7 +682,7 @@ export function EmployeeForm() {
             {pushOpen && (
               <>
                 <p className="hint" style={{ marginBottom: 8 }}>
-                  웹훅 설정 시 POST · 실패 시 복사 폴백
+                  요약 복사. 서버 웹훅(NW_WEBHOOK_URL)이 있으면 관리자 API로만 전송합니다.
                 </p>
                 <textarea className="push-preview" rows={10} readOnly value={pushText} />
                 <button
@@ -680,17 +692,16 @@ export function EmployeeForm() {
                   disabled={pushing}
                   onClick={async () => {
                     setPushing(true)
-                    const result = await tryPushWebhook(state.settings, pushText)
                     try {
                       await navigator.clipboard.writeText(pushText)
+                      showToast('요약을 클립보드에 복사했습니다.')
                     } catch {
-                      /* ignore */
+                      showToast('복사 실패 — 텍스트를 직접 선택해 주세요.')
                     }
-                    showToast(result.detail)
                     setPushing(false)
                   }}
                 >
-                  {pushing ? '전송 중…' : '웹훅 시도 + 복사'}
+                  {pushing ? '처리 중…' : '요약 복사'}
                 </button>
               </>
             )}

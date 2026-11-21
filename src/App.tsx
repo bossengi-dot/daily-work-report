@@ -1,3 +1,5 @@
+'use client'
+
 import { EmployeeForm } from './components/EmployeeForm'
 import { JoinAdminScreen } from './components/JoinAdminScreen'
 import { LoginScreen } from './components/LoginScreen'
@@ -8,9 +10,17 @@ import { WeeklySummary } from './components/WeeklySummary'
 import { useStore } from './store'
 
 export default function App() {
-  const { view, setView, state, toast, session, logout } = useStore()
+  const { ready, view, setView, state, toast, session, logout } = useStore()
 
-  if (!session) {
+  if (!ready) {
+    return (
+      <div className="login-page">
+        <div className="hint">불러오는 중…</div>
+      </div>
+    )
+  }
+
+  if (!session || !session.role) {
     return (
       <>
         <LoginScreen />
@@ -71,8 +81,9 @@ export default function App() {
           </nav>
           <div className="sidenav-foot">
             <div className="hint">{session.displayName}</div>
+            {session.simulated && <div className="hint">시뮬 뷰어</div>}
             <button type="button" className="ghost-btn" onClick={logout}>
-              로그아웃
+              안내
             </button>
           </div>
         </aside>
@@ -125,7 +136,7 @@ export default function App() {
             <span>{state.currentDate}</span>
             {!isManager && (
               <button type="button" className="ghost-btn" onClick={logout}>
-                로그아웃
+                안내
               </button>
             )}
           </div>

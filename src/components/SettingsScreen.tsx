@@ -1,10 +1,11 @@
+'use client'
+
 import { useState } from 'react'
 import { useStore } from '../store'
 
 export function SettingsScreen() {
   const {
     state,
-    updateSettings,
     setEmployeeOoo,
     actingAsEmployeeId,
     setActingAsEmployeeId,
@@ -29,7 +30,7 @@ export function SettingsScreen() {
         <div>
           <h1>설정</h1>
           <p>
-            연동 URL·키는 이 브라우저 localStorage에만 저장됩니다. 코드에 비밀값을 넣지 않습니다.
+            역할·데이터는 서버에서 관리됩니다. 웹훅/LLM 비밀값은 앱 시크릿으로만 설정하세요.
           </p>
         </div>
       </div>
@@ -37,61 +38,14 @@ export function SettingsScreen() {
       <div className="stack" style={{ maxWidth: 640 }}>
         <section className="panel panel-pad">
           <div className="section-title">
-            <h2>NAVER WORKS / 채팅 웹훅</h2>
+            <h2>계정</h2>
           </div>
-          <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
-            값이 있으면 푸시 시 POST 시도 → 실패/미설정 시 클립보드 폴백
+          <p className="hint">
+            {session?.displayName}
+            {session?.email ? ` · ${session.email}` : ''}
+            {session?.role ? ` · ${session.role === 'manager' ? '관리자' : '직원'}` : ''}
+            {session?.simulated ? ' · 로컬 시뮬 뷰어' : ''}
           </p>
-          <div className="field">
-            <label style={{ fontSize: 12, fontWeight: 600 }}>Webhook URL</label>
-            <input
-              type="url"
-              placeholder="https://hooks.example.com/..."
-              value={state.settings.nwWebhookUrl}
-              onChange={(e) => updateSettings({ nwWebhookUrl: e.target.value })}
-              autoComplete="off"
-            />
-          </div>
-        </section>
-
-        <section className="panel panel-pad">
-          <div className="section-title">
-            <h2>LLM API (선택)</h2>
-          </div>
-          <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
-            엔드포인트+키가 있으면 주간 브리프 생성 시 호출 → 없거나 실패 시 휴리스틱 폴백
-          </p>
-          <div className="field" style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 12, fontWeight: 600 }}>Endpoint URL</label>
-            <input
-              type="url"
-              placeholder="https://api.openai.com/v1/chat/completions"
-              value={state.settings.llmEndpoint}
-              onChange={(e) => updateSettings({ llmEndpoint: e.target.value })}
-              autoComplete="off"
-            />
-          </div>
-          <div className="field">
-            <label style={{ fontSize: 12, fontWeight: 600 }}>API Key</label>
-            <input
-              type="password"
-              placeholder="sk-... (이 기기에만 저장)"
-              value={state.settings.llmApiKey}
-              onChange={(e) => updateSettings({ llmApiKey: e.target.value })}
-              autoComplete="off"
-            />
-          </div>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            style={{ marginTop: 10 }}
-            onClick={() => {
-              updateSettings({ llmApiKey: '', llmEndpoint: '', nwWebhookUrl: '' })
-              showToast('연동 설정을 비웠습니다.')
-            }}
-          >
-            연동 설정 모두 지우기
-          </button>
         </section>
 
         <section className="panel panel-pad">
@@ -131,11 +85,12 @@ export function SettingsScreen() {
                 style={{ marginLeft: 8 }}
                 onClick={() => {
                   if (!target) return
-                  setEmployeeOoo(target.id, null)
-                  setOooStart('')
-                  setOooEnd('')
-                  setOooReason('')
-                  showToast('부재를 해제했습니다.')
+                  void setEmployeeOoo(target.id, null).then(() => {
+                    setOooStart('')
+                    setOooEnd('')
+                    setOooReason('')
+                    showToast('부재를 해제했습니다.')
+                  })
                 }}
               >
                 해제
@@ -171,12 +126,11 @@ export function SettingsScreen() {
               disabled={!targetId || !oooStart || !oooEnd}
               onClick={() => {
                 if (!targetId) return
-                setEmployeeOoo(targetId, {
+                void setEmployeeOoo(targetId, {
                   start: oooStart,
                   end: oooEnd,
                   reason: oooReason || undefined,
-                })
-                showToast('부재 기간을 저장했습니다.')
+                }).then(() => showToast('부재 기간을 저장했습니다.'))
               }}
             >
               부재 저장
@@ -189,22 +143,27 @@ export function SettingsScreen() {
             <h2>첨부 안내</h2>
           </div>
           <p className="hint">
-            로컬 파일 첨부는 object URL로 미리보기만 제공합니다. localStorage에는 파일명·크기·MIME
-            메타만 남고, 바이너리는 저장하지 않습니다. 새로고침 시 미리보기 URL은 만료됩니다.
+            첨부 링크는 http(s)만 허용됩니다. javascript·data 스킴은 차단합니다.
           </p>
         </section>
 
-        <section className="panel panel-pad">
-          <div className="section-title">
-            <h2>데모 데이터</h2>
-          </div>
-          <p className="hint" style={{ marginBottom: 10 }}>
-            시드 v4(직원 10명·5영업일)로 초기화합니다. 연동 설정·세션은 유지됩니다.
-          </p>
-          <button type="button" className="btn btn-outline" onClick={resetSeed}>
-            시드 리셋
-          </button>
-        </section>
+        {session?.role === 'manager' && (
+          <section className="panel panel-pad">
+            <div className="section-title">
+              <h2>데모 데이터</h2>
+            </div>
+            <p className="hint" style={{ marginBottom: 10 }}>
+              시드(직원 10명·5영업일)로 초기화합니다. 사용자 역할(관리자/직원)은 유지됩니다.
+            </p>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => void resetSeed()}
+            >
+              시드 리셋
+            </button>
+          </section>
+        )}
       </div>
     </div>
   )

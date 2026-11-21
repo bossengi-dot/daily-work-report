@@ -1,3 +1,5 @@
+'use client'
+
 import { useEffect, useMemo, useState } from 'react'
 import { generateWeeklyBrief } from '../lib/aiBrief'
 import { tryGenerateBrief } from '../lib/integrations'
@@ -23,7 +25,7 @@ export function WeeklySummary() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const result = await tryGenerateBrief(state, state.settings)
+      const result = await tryGenerateBrief(state)
       if (!cancelled) {
         setBrief(result.text)
         setBriefDetail(result.detail)

@@ -12,13 +12,6 @@ export const BUSINESS_DAYS = [
   '2026-09-17',
 ] as const
 
-export const STORAGE_KEY = 'daily-report-mvp-v5'
-export const SETTINGS_KEY = 'daily-report-mvp-settings-v1'
-export const SESSION_KEY = 'daily-report-mvp-session-v1'
-
-/** UX stub only — not real security */
-export const MANAGER_PIN = '0000'
-
 const TOPIC_LINES = [
   '콘젯 Nalta 점검·수리',
   '독일 출장 정산·보고서',
@@ -56,7 +49,6 @@ function makeEmployees(): Employee[] {
       role: '시니어 기술·구매',
       dept: '기술부',
       initials: '박',
-      pin: '1111',
     },
     {
       id: 'e2',
@@ -64,7 +56,6 @@ function makeEmployees(): Employee[] {
       role: '현장지원',
       dept: '기술부',
       initials: '김',
-      pin: '2222',
     },
     {
       id: 'e3',
@@ -72,7 +63,6 @@ function makeEmployees(): Employee[] {
       role: '사무 IT',
       dept: '관리부',
       initials: '이',
-      pin: '3333',
       ooo: { start: '2026-09-17', end: '2026-09-18', reason: '개인 휴가' },
     },
     {
@@ -81,7 +71,6 @@ function makeEmployees(): Employee[] {
       role: '구매담당',
       dept: '구매부',
       initials: '최',
-      pin: '4444',
     },
     {
       id: 'e5',
@@ -89,7 +78,6 @@ function makeEmployees(): Employee[] {
       role: '기술지원',
       dept: '기술부',
       initials: '정',
-      pin: '5555',
     },
     {
       id: 'e6',
@@ -97,7 +85,6 @@ function makeEmployees(): Employee[] {
       role: '품질관리',
       dept: '품질부',
       initials: '한',
-      pin: '6666',
     },
     {
       id: 'e7',
@@ -105,7 +92,6 @@ function makeEmployees(): Employee[] {
       role: '영업지원',
       dept: '영업부',
       initials: '오',
-      pin: '7777',
       ooo: { start: '2026-09-16', end: '2026-09-17', reason: '출장' },
     },
     {
@@ -114,7 +100,6 @@ function makeEmployees(): Employee[] {
       role: '설비보전',
       dept: '기술부',
       initials: '윤',
-      pin: '8888',
     },
     {
       id: 'e9',
@@ -122,7 +107,6 @@ function makeEmployees(): Employee[] {
       role: '기획',
       dept: '경영지원',
       initials: '강',
-      pin: '9999',
     },
     {
       id: 'e10',
@@ -130,7 +114,6 @@ function makeEmployees(): Employee[] {
       role: '물류',
       dept: '관리부',
       initials: '배',
-      pin: '1010',
     },
   ]
 }
@@ -552,17 +535,7 @@ export function createSeed(): AppState {
     reports,
     topics: [],
     weeklyTodos: [],
-    joinApplications: [
-      {
-        id: 'ja-seed-1',
-        name: '송하린',
-        dept: '기술부',
-        desiredPin: '1212',
-        memo: '신규 입사 — 현장지원 예정',
-        status: 'pending',
-        createdAt: `${TODAY} 10:00`,
-      },
-    ],
+    joinApplications: [],
   }
 }
 
@@ -571,9 +544,5 @@ export const SEED_META = {
   employeeCount: 10,
   businessDays: [...BUSINESS_DAYS],
   today: TODAY,
-  pins: {
-    manager: MANAGER_PIN,
-    employees: Object.fromEntries(makeEmployees().map((e) => [e.name, e.pin])),
-  },
   todayProfiles: TODAY_PROFILE,
 }

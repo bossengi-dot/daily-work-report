@@ -1,3 +1,5 @@
+'use client'
+
 import { useMemo, useState } from 'react'
 import { tryGenerateBrief } from '../lib/integrations'
 import {
@@ -40,7 +42,7 @@ export function MonthlySummary() {
       ...state,
       weekRange: { start, end },
     }
-    const result = await tryGenerateBrief(monthState, state.settings)
+    const result = await tryGenerateBrief(monthState)
     setBrief(
       result.text.startsWith('주간')
         ? result.text.replace('주간 업무 브리프', '월간 업무 브리프')

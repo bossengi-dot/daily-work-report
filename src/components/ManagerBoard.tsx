@@ -1,3 +1,5 @@
+'use client'
+
 import { useEffect, useMemo, useState } from 'react'
 import { composeChatSummary } from '../lib/pushMessage'
 import {

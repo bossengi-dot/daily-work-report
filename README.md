@@ -1,32 +1,23 @@
-# React + TypeScript + Vite
+# 일일업무보고
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+직원 일일업무보고 · 매니저 보드 · 주간/월간 요약 웹앱.
 
-Currently, two official plugins are available:
+## Auth
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Cursor private/team 앱 로그인(SSO)으로 사용자를 확인합니다.
+- 첫 번째 로그인 사용자가 관리자가 됩니다.
+- 이후 사용자는 가입 신청 → 관리자 승인 후 직원 역할이 부여됩니다.
+- PIN 기반 데모 로그인은 제거되었습니다. 역할은 서버(`user_roles`)에서만 결정됩니다.
 
-## React Compiler
+## Develop
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Build
+
+```bash
+npm run build
+```

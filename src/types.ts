@@ -24,8 +24,6 @@ export interface Employee {
   role: string
   dept: string
   initials: string
-  /** UX-only stub PIN (not real auth) */
-  pin: string
   ooo?: OooPeriod | null
 }
 
@@ -107,10 +105,10 @@ export interface WeeklyTodo {
   status: ItemStatus | 'delayed'
 }
 
+/** Non-secret client settings only. Webhook/LLM secrets live in server env. */
 export interface AppSettings {
-  nwWebhookUrl: string
-  llmEndpoint: string
-  llmApiKey: string
+  /** reserved — secrets are not stored client-side */
+  _placeholder?: never
 }
 
 export type JoinAppStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
@@ -119,21 +117,26 @@ export interface JoinApplication {
   id: string
   name: string
   dept: string
-  desiredPin?: string
   memo: string
   status: JoinAppStatus
   createdAt: string
   reviewedAt?: string
   rejectReason?: string
-  /** set on approve when PIN was auto-generated */
-  issuedPin?: string
+  /** Cursor identity sub of the applicant (server-set) */
+  applicantSub?: string
   employeeId?: string
 }
 
 export interface Session {
-  role: SessionRole
+  role: SessionRole | null
   employeeId: string | null
   displayName: string
+  cursorSub: string
+  email: string
+  stage: 'production' | 'preview'
+  simulated: boolean
+  needsJoin: boolean
+  kind: 'person' | 'key'
 }
 
 export interface AppState {
@@ -166,8 +169,4 @@ export function isOooOn(emp: Employee, date: string): boolean {
   return date >= emp.ooo.start && date <= emp.ooo.end
 }
 
-export const DEFAULT_SETTINGS: AppSettings = {
-  nwWebhookUrl: '',
-  llmEndpoint: '',
-  llmApiKey: '',
-}
+export const DEFAULT_SETTINGS: AppSettings = {}

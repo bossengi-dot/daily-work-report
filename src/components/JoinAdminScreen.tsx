@@ -1,3 +1,5 @@
+'use client'
+
 import { useMemo, useState } from 'react'
 import type { JoinAppStatus } from '../types'
 import { useStore } from '../store'
@@ -30,8 +32,6 @@ export function JoinAdminScreen() {
     rejectJoinApplication,
     cancelJoinApplication,
     registerEmployeeDirect,
-    lastIssuedPin,
-    clearLastIssuedPin,
   } = useStore()
 
   const [filter, setFilter] = useState<JoinAppStatus | 'all'>('pending')
@@ -39,7 +39,6 @@ export function JoinAdminScreen() {
   const [rejectReason, setRejectReason] = useState('')
   const [directName, setDirectName] = useState('')
   const [directDept, setDirectDept] = useState('')
-  const [directPin, setDirectPin] = useState('')
 
   const list = useMemo(() => {
     const apps = state.joinApplications
@@ -51,22 +50,21 @@ export function JoinAdminScreen() {
 
   const onReject = () => {
     if (!rejectId) return
-    rejectJoinApplication(rejectId, rejectReason)
+    void rejectJoinApplication(rejectId, rejectReason)
     setRejectId(null)
     setRejectReason('')
   }
 
   const onDirect = () => {
-    const res = registerEmployeeDirect({
+    void registerEmployeeDirect({
       name: directName,
       dept: directDept,
-      pin: directPin || undefined,
+    }).then((res) => {
+      if (res.ok) {
+        setDirectName('')
+        setDirectDept('')
+      }
     })
-    if (res.ok) {
-      setDirectName('')
-      setDirectDept('')
-      setDirectPin('')
-    }
   }
 
   return (
@@ -75,22 +73,10 @@ export function JoinAdminScreen() {
         <div>
           <h1>가입신청</h1>
           <p>
-            대기 {pendingCount}건 · 승인 시 직원으로 등록되며 로그인 목록에 나타납니다.
+            대기 {pendingCount}건 · 승인 시 Cursor 계정이 직원 역할로 연결됩니다.
           </p>
         </div>
       </div>
-
-      {lastIssuedPin && (
-        <div className="pin-once-banner" role="status">
-          <div>
-            <strong>{lastIssuedPin.name}</strong> PIN이 발급되었습니다. 이 화면에서만 확인하세요.
-            <div className="pin-once-value">{lastIssuedPin.pin}</div>
-          </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={clearLastIssuedPin}>
-            확인 · 닫기
-          </button>
-        </div>
-      )}
 
       <div className="stack" style={{ gap: 16 }}>
         <section className="panel panel-pad">
@@ -98,7 +84,8 @@ export function JoinAdminScreen() {
             <h2>직접 등록</h2>
           </div>
           <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
-            신청 없이 이름·부서·PIN으로 바로 직원을 추가합니다. PIN 비우면 4자리 자동 발급.
+            데모용 직원 프로필만 만듭니다. 본인 로그인은 해당 사용자가 가입 신청 후 승인받아야
+            합니다.
           </p>
           <div className="join-direct-grid">
             <div className="field">
@@ -115,16 +102,6 @@ export function JoinAdminScreen() {
                 value={directDept}
                 onChange={(e) => setDirectDept(e.target.value)}
                 placeholder="부서"
-              />
-            </div>
-            <div className="field">
-              <label style={{ fontSize: 12, fontWeight: 600 }}>PIN (선택)</label>
-              <input
-                inputMode="numeric"
-                value={directPin}
-                onChange={(e) => setDirectPin(e.target.value)}
-                placeholder="4자리 · 비우면 자동"
-                maxLength={4}
               />
             </div>
             <div className="field" style={{ justifyContent: 'flex-end' }}>
@@ -171,7 +148,6 @@ export function JoinAdminScreen() {
                     </div>
                     <div className="hint">
                       {app.dept}
-                      {app.desiredPin ? ` · 희망 PIN ${app.desiredPin[0]}***` : ' · PIN 자동발급 요청'}
                       {' · '}
                       {app.createdAt}
                     </div>
@@ -190,7 +166,7 @@ export function JoinAdminScreen() {
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"
-                        onClick={() => approveJoinApplication(app.id)}
+                        onClick={() => void approveJoinApplication(app.id)}
                       >
                         승인
                       </button>
@@ -207,7 +183,7 @@ export function JoinAdminScreen() {
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        onClick={() => cancelJoinApplication(app.id)}
+                        onClick={() => void cancelJoinApplication(app.id)}
                       >
                         대기 취소
                       </button>

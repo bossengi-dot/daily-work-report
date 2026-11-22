@@ -8,6 +8,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Synology DSM @eaDir folders become Next parallel-route slots and break LayoutProps.
+RUN find . -type d \( -name '@eaDir' -o -name '#recycle' -o -name '@tmp' -o -name '@SynoResource' \) -prune -exec rm -rf {} +
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL=
 # migrate는 DATABASE_URL 없을 때 no-op → Docker 시작 시 entrypoint에서 실행

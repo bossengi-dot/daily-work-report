@@ -10,3 +10,10 @@ playwright-report
 test-results
 dist
 *.log
+
+# Synology DSM creates @eaDir for media indexing. Next.js treats
+# app/@eaDir as a parallel route slot and fails typed LayoutProps.
+**/@eaDir
+**/#recycle
+**/@tmp
+**/@SynoResource

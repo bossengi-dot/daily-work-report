@@ -28,3 +28,9 @@ next-env.d.ts
 *.njsproj
 *.sln
 *.sw?
+
+# Synology DSM media-index folders (break Next.js LayoutProps as @eaDir slots)
+**/@eaDir
+**/#recycle
+**/@tmp
+**/@SynoResource

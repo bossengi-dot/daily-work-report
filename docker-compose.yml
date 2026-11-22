@@ -42,6 +42,9 @@ services:
       INVITE_CODE: ${INVITE_CODE:-welcome}
       # HTTPS 리버스 프록시 뒤에 둘 때만 true
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # (선택) 주간/월간 브리프 LLM — .env 의 OPENAI_API_KEY 만 서버로 전달
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
 
 volumes:
   db_data:

@@ -1,7 +1,7 @@
 import type { AppState } from '../types'
 import { deriveWeeklyTodos, deriveWeeklyTopics, employeeName, weekKpi } from './weekly'
 
-/** 규칙 기반 주간 브리프 초안. LLM 다듬기는 서버(openaiBrief)에서만 수행. */
+/** 규칙 기반 주간 브리프 초안. */
 export function generateWeeklyBrief(state: AppState): string {
   const kpi = weekKpi(state)
   const topics = deriveWeeklyTopics(state)
@@ -66,4 +66,20 @@ export function generateWeeklyBrief(state: AppState): string {
   lines.push('')
   lines.push('— 본 초안은 규칙 기반 자동 생성입니다. 사람 검토 후 발송하세요. —')
   return lines.join('\n')
+}
+
+/** 주간·월간 규칙 기반 브리프 초안 (클라이언트에서 바로 생성). */
+export function generateBriefDraft(
+  state: AppState,
+  period: 'week' | 'month' = 'week',
+): string {
+  const scoped =
+    period === 'month' ? { ...state, weekRange: { ...state.monthRange } } : state
+  let text = generateWeeklyBrief(scoped)
+  if (period === 'month') {
+    text = text.startsWith('주간')
+      ? text.replace('주간 업무 브리프', '월간 업무 브리프')
+      : `월간 업무 브리프 초안\n\n${text}`
+  }
+  return text
 }

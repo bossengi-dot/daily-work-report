@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { tryGenerateBrief } from '../lib/integrations'
+import { generateBriefDraft } from '../lib/aiBrief'
 import {
   deriveTodosForRange,
   deriveTopicsForRange,
@@ -13,9 +13,6 @@ export function MonthlySummary() {
   const { state, showToast } = useStore()
   const { start, end } = state.monthRange
   const [brief, setBrief] = useState('')
-  const [briefMode, setBriefMode] = useState<'llm' | 'heuristic' | ''>('')
-  const [briefDetail, setBriefDetail] = useState('')
-  const [loading, setLoading] = useState(false)
 
   const kpi = useMemo(() => rangeKpi(state, start, end), [state, start, end])
   const topics = useMemo(() => deriveTopicsForRange(state, start, end), [state, start, end])
@@ -36,16 +33,9 @@ export function MonthlySummary() {
       .slice(0, 8)
   }, [topics])
 
-  const loadBrief = async () => {
-    setLoading(true)
-    const result = await tryGenerateBrief(state, { period: 'month' })
-    setBrief(result.text)
-    setBriefMode(result.mode)
-    setBriefDetail(result.detail)
-    setLoading(false)
-    showToast(
-      `${result.mode === 'llm' ? 'LLM' : '휴리스틱'} · ${result.detail}`,
-    )
+  const loadBrief = () => {
+    setBrief(generateBriefDraft(state, 'month'))
+    showToast('규칙 기반 초안 · 검토 후 공유')
   }
 
   return (
@@ -99,20 +89,16 @@ export function MonthlySummary() {
         <div>
           <strong>사람 검토 후 발송</strong>
           <p className="hint" style={{ margin: '4px 0 0' }}>
-            {briefMode
-              ? `${briefMode === 'llm' ? 'LLM' : '휴리스틱'} · ${briefDetail}`
-              : 'LLM 설정 시 시도 · 없으면 휴리스틱'}{' '}
-            · 시드 월 데이터는 9/14~17 중심
+            규칙 기반 초안 · 검토 후 공유 · 시드 월 데이터는 9/14~17 중심
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             type="button"
             className="btn btn-outline btn-sm"
-            disabled={loading}
             onClick={loadBrief}
           >
-            {loading ? '생성 중…' : '월간 브리프 생성'}
+            월간 브리프 생성
           </button>
           {brief && (
             <button

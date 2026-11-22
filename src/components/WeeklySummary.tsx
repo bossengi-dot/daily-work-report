@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { generateWeeklyBrief } from '../lib/aiBrief'
-import { tryGenerateBrief } from '../lib/integrations'
+import { useMemo, useState } from 'react'
+import { generateBriefDraft } from '../lib/aiBrief'
 import {
   deriveWeeklyTodos,
   deriveWeeklyTopics,
@@ -15,28 +14,11 @@ export function WeeklySummary() {
   const { state, getReport, showToast } = useStore()
   const { start, end } = state.weekRange
   const [briefOpen, setBriefOpen] = useState(true)
-  const [brief, setBrief] = useState(() => generateWeeklyBrief(state))
-  const [briefMode, setBriefMode] = useState<'llm' | 'heuristic'>('heuristic')
-  const [briefDetail, setBriefDetail] = useState('규칙 기반 초안')
 
+  const brief = useMemo(() => generateBriefDraft(state, 'week'), [state])
   const kpi = useMemo(() => weekKpi(state), [state])
   const topics = useMemo(() => deriveWeeklyTopics(state), [state])
   const todos = useMemo(() => deriveWeeklyTodos(state), [state])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const result = await tryGenerateBrief(state, { period: 'week' })
-      if (!cancelled) {
-        setBrief(result.text)
-        setBriefMode(result.mode)
-        setBriefDetail(result.detail)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [state])
 
   const todayStatus = (employeeId: string) => {
     const r = getReport(employeeId)
@@ -100,8 +82,7 @@ export function WeeklySummary() {
         <div>
           <strong>사람 검토 후 발송</strong>
           <p className="hint" style={{ margin: '4px 0 0' }}>
-            {briefMode === 'llm' ? 'LLM' : '휴리스틱'} · {briefDetail}. 검토·수정 후
-            공유하세요.
+            규칙 기반 초안 · 검토 후 공유
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

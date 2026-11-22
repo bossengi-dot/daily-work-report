@@ -1,6 +1,11 @@
 'use client'
 
 import { useState } from 'react'
+import {
+  composeWorkHistoryText,
+  downloadTextFile,
+  exportFilename,
+} from '../lib/exportText'
 import { useStore } from '../store'
 
 export function SettingsScreen() {
@@ -23,6 +28,35 @@ export function SettingsScreen() {
   const [oooStart, setOooStart] = useState(target?.ooo?.start ?? '')
   const [oooEnd, setOooEnd] = useState(target?.ooo?.end ?? '')
   const [oooReason, setOooReason] = useState(target?.ooo?.reason ?? '')
+  const [exportFrom, setExportFrom] = useState('')
+  const [exportTo, setExportTo] = useState('')
+  const [exportAll, setExportAll] = useState(true)
+
+  const exportSelf = () => {
+    if (!target) {
+      showToast('내보낼 구성원 정보가 없습니다.')
+      return
+    }
+    // Employees may only export their own linked employeeId.
+    if (
+      session?.role === 'employee' &&
+      session.employeeId &&
+      target.id !== session.employeeId
+    ) {
+      showToast('본인 보고만 내보낼 수 있습니다.')
+      return
+    }
+    const range = exportAll
+      ? undefined
+      : { from: exportFrom || undefined, to: exportTo || undefined }
+    if (!exportAll && exportFrom && exportTo && exportFrom > exportTo) {
+      showToast('시작일이 종료일보다 늦습니다.')
+      return
+    }
+    const text = composeWorkHistoryText(target, state.reports, range)
+    downloadTextFile(exportFilename(target.name, range), text)
+    showToast('보고를 텍스트로 내보냈습니다.')
+  }
 
   return (
     <div className="page">
@@ -46,6 +80,85 @@ export function SettingsScreen() {
             {session?.role ? ` · ${session.role === 'manager' ? '관리자' : '직원'}` : ''}
             {session?.simulated ? ' · 로컬 시뮬 뷰어' : ''}
           </p>
+        </section>
+
+        <section className="panel panel-pad">
+          <div className="section-title">
+            <h2>보고 텍스트로보내기</h2>
+          </div>
+          <p className="hint" style={{ marginBottom: 10 }}>
+            {session?.role === 'manager'
+              ? '선택한 구성원의 일일보고 이력을 .txt로 다운로드합니다. (구성원 화면에서도 가능)'
+              : '내 일일보고 이력을 .txt 파일로 다운로드합니다.'}
+          </p>
+          {session?.role === 'manager' && (
+            <div className="chip-row" style={{ marginBottom: 10 }}>
+              {state.employees.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  className={`filter-chip ${targetId === e.id ? 'active' : ''}`}
+                  onClick={() => setActingAsEmployeeId(e.id)}
+                >
+                  {e.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="hint" style={{ marginBottom: 10 }}>
+            대상: {target?.name ?? '—'}
+          </p>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 10,
+              fontSize: 13,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={exportAll}
+              onChange={(e) => setExportAll(e.target.checked)}
+            />
+            전체 기간
+          </label>
+          {!exportAll && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 8,
+                marginBottom: 10,
+              }}
+            >
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>시작</label>
+                <input
+                  type="date"
+                  value={exportFrom}
+                  onChange={(e) => setExportFrom(e.target.value)}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>종료</label>
+                <input
+                  type="date"
+                  value={exportTo}
+                  onChange={(e) => setExportTo(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={!target}
+            onClick={exportSelf}
+          >
+            텍스트로보내기
+          </button>
         </section>
 
         <section className="panel panel-pad">

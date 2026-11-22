@@ -1806,6 +1806,10 @@ tr.row-bar.bar-missing td:first-child {
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
 }
 
+.modal-panel-wide {
+  width: min(480px, 100%);
+}
+
 @media (max-width: 900px) {
   .join-direct-grid,
   .join-direct-grid-local {

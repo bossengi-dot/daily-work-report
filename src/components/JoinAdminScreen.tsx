@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { JoinAppStatus } from '../types'
+import {
+  composeWorkHistoryText,
+  downloadTextFile,
+  exportFilename,
+} from '../lib/exportText'
 import { useStore } from '../store'
 
 const FILTERS: { id: JoinAppStatus | 'all'; label: string }[] = [
@@ -46,8 +51,10 @@ export function JoinAdminScreen() {
     cancelJoinApplication,
     registerEmployeeDirect,
     deleteMember,
+    updateEmployee,
     fetchMembers,
     createInviteCode,
+    showToast,
   } = useStore()
 
   const [filter, setFilter] = useState<JoinAppStatus | 'all'>('pending')
@@ -63,6 +70,19 @@ export function JoinAdminScreen() {
   const [membersLoading, setMembersLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<MemberRow | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
+
+  const [editTarget, setEditTarget] = useState<MemberRow | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDept, setEditDept] = useState('')
+  const [editRole, setEditRole] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editPassword, setEditPassword] = useState('')
+  const [editBusy, setEditBusy] = useState(false)
+
+  const [exportTarget, setExportTarget] = useState<MemberRow | null>(null)
+  const [exportFrom, setExportFrom] = useState('')
+  const [exportTo, setExportTo] = useState('')
+  const [exportAll, setExportAll] = useState(true)
 
   const list = useMemo(() => {
     const apps = state.joinApplications
@@ -83,6 +103,22 @@ export function JoinAdminScreen() {
   useEffect(() => {
     reloadMembers()
   }, [reloadMembers, state.employees])
+
+  const openEdit = (m: MemberRow) => {
+    setEditTarget(m)
+    setEditName(m.name)
+    setEditDept(m.dept)
+    setEditRole(m.role)
+    setEditEmail(m.email ?? '')
+    setEditPassword('')
+  }
+
+  const openExport = (m: MemberRow) => {
+    setExportTarget(m)
+    setExportAll(true)
+    setExportFrom('')
+    setExportTo('')
+  }
 
   const onReject = () => {
     if (!rejectId) return
@@ -121,6 +157,57 @@ export function JoinAdminScreen() {
         reloadMembers()
       }
     })
+  }
+
+  const onSaveEdit = () => {
+    if (!editTarget || editBusy) return
+    setEditBusy(true)
+    const emailTrim = editEmail.trim()
+    const passwordTrim = editPassword.trim()
+    const options =
+      authMode === 'local'
+        ? {
+            email: emailTrim || undefined,
+            password: passwordTrim || undefined,
+          }
+        : undefined
+
+    void updateEmployee(
+      editTarget.employeeId,
+      {
+        name: editName,
+        dept: editDept,
+        role: editRole,
+      },
+      options,
+    ).then((res) => {
+      setEditBusy(false)
+      if (res.ok) {
+        setEditTarget(null)
+        setEditPassword('')
+        reloadMembers()
+      }
+    })
+  }
+
+  const onDownloadExport = () => {
+    if (!exportTarget) return
+    const emp = state.employees.find((e) => e.id === exportTarget.employeeId)
+    if (!emp) {
+      showToast('구성원을 찾을 수 없습니다.')
+      return
+    }
+    const range = exportAll
+      ? undefined
+      : { from: exportFrom || undefined, to: exportTo || undefined }
+    if (!exportAll && exportFrom && exportTo && exportFrom > exportTo) {
+      showToast('시작일이 종료일보다 늦습니다.')
+      return
+    }
+    const text = composeWorkHistoryText(emp, state.reports, range)
+    downloadTextFile(exportFilename(emp.name, range), text)
+    showToast(`${emp.name} 보고를 텍스트로 내보냈습니다.`)
+    setExportTarget(null)
   }
 
   return (
@@ -253,6 +340,9 @@ export function JoinAdminScreen() {
                         <span className="badge badge-carry">미연결</span>
                       )}
                       {m.ooo && <span className="badge badge-revision">부재</span>}
+                      {m.accountRole === 'manager' && (
+                        <span className="badge badge-progress">관리자</span>
+                      )}
                     </div>
                     <div className="hint">
                       {m.dept}
@@ -267,6 +357,20 @@ export function JoinAdminScreen() {
                     </div>
                   </div>
                   <div className="join-app-actions">
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => openEdit(m)}
+                    >
+                      수정
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => openExport(m)}
+                    >
+                      텍스트로보내기
+                    </button>
                     <button
                       type="button"
                       className="btn btn-danger-outline btn-sm"
@@ -430,6 +534,163 @@ export function JoinAdminScreen() {
                 onClick={onConfirmDelete}
               >
                 {deleteBusy ? '삭제 중…' : '삭제 확정'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editTarget && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-panel modal-panel-wide">
+            <h3 style={{ margin: '0 0 8px' }}>구성원 정보 수정</h3>
+            <p className="hint" style={{ marginBottom: 12 }}>
+              {editTarget.name}
+              {editTarget.accountRole === 'manager' ? ' · 관리자 연결' : ''}
+              {authMode === 'local' && !editTarget.linked
+                ? ' · 이메일·비밀번호를 넣으면 로그인 계정을 연결합니다.'
+                : authMode === 'local'
+                  ? ' · 비밀번호는 비워 두면 유지됩니다.'
+                  : ''}
+            </p>
+            <div className="stack" style={{ gap: 10, marginBottom: 14 }}>
+              <div className="field">
+                <label style={{ fontSize: 12, fontWeight: 600 }}>이름</label>
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="이름"
+                />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: 12, fontWeight: 600 }}>부서</label>
+                <input
+                  value={editDept}
+                  onChange={(e) => setEditDept(e.target.value)}
+                  placeholder="부서"
+                />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: 12, fontWeight: 600 }}>직책</label>
+                <input
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value)}
+                  placeholder="팀원"
+                />
+              </div>
+              {authMode === 'local' && (
+                <>
+                  <div className="field">
+                    <label style={{ fontSize: 12, fontWeight: 600 }}>
+                      이메일{editTarget.linked ? '' : ' (연결 시 필수)'}
+                    </label>
+                    <input
+                      type="email"
+                      autoComplete="off"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      placeholder="user@example.com"
+                    />
+                  </div>
+                  <div className="field">
+                    <label style={{ fontSize: 12, fontWeight: 600 }}>
+                      {editTarget.linked
+                        ? '비밀번호 재설정 (선택)'
+                        : '비밀번호 (연결 시 필수)'}
+                    </label>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={editPassword}
+                      onChange={(e) => setEditPassword(e.target.value)}
+                      placeholder="8자 이상 · 비우면 변경 안 함"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={editBusy}
+                onClick={() => setEditTarget(null)}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={editBusy || !editName.trim() || !editDept.trim()}
+                onClick={onSaveEdit}
+              >
+                {editBusy ? '저장 중…' : '저장'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {exportTarget && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-panel">
+            <h3 style={{ margin: '0 0 8px' }}>텍스트로보내기</h3>
+            <p className="hint" style={{ marginBottom: 12 }}>
+              <strong>{exportTarget.name}</strong>의 일일보고를 .txt 파일로 다운로드합니다.
+            </p>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 10,
+                fontSize: 13,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={exportAll}
+                onChange={(e) => setExportAll(e.target.checked)}
+              />
+              전체 기간
+            </label>
+            {!exportAll && (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 8,
+                  marginBottom: 12,
+                }}
+              >
+                <div className="field">
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>시작일</label>
+                  <input
+                    type="date"
+                    value={exportFrom}
+                    onChange={(e) => setExportFrom(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>종료일</label>
+                  <input
+                    type="date"
+                    value={exportTo}
+                    onChange={(e) => setExportTo(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setExportTarget(null)}
+              >
+                취소
+              </button>
+              <button type="button" className="btn btn-primary" onClick={onDownloadExport}>
+                다운로드
               </button>
             </div>
           </div>

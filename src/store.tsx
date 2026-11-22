@@ -109,7 +109,11 @@ interface StoreValue {
   setManagerAck: (reportId: string, ack: ManagerAck) => Promise<void>
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>
   setEmployeeOoo: (employeeId: string, ooo: OooPeriod | null) => Promise<void>
-  updateEmployee: (employeeId: string, patch: Partial<Employee>) => Promise<void>
+  updateEmployee: (
+    employeeId: string,
+    patch: Partial<Pick<Employee, 'name' | 'dept' | 'role'>>,
+    options?: { email?: string; password?: string },
+  ) => Promise<{ ok: boolean; message?: string }>
   submitJoinApplication: (input: {
     name: string
     dept: string
@@ -522,8 +526,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const updateEmployee = useCallback(
-    async (employeeId: string, patch: Partial<Employee>) => {
-      await run({ type: 'updateEmployee', employeeId, patch })
+    async (
+      employeeId: string,
+      patch: Partial<Pick<Employee, 'name' | 'dept' | 'role'>>,
+      options?: { email?: string; password?: string },
+    ) => {
+      const result = await run({
+        type: 'updateEmployee',
+        employeeId,
+        patch,
+        email: options?.email,
+        password: options?.password,
+      })
+      return { ok: result.ok, message: result.message }
     },
     [run],
   )

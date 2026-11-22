@@ -91,6 +91,31 @@ export async function deleteLocalAccount(id: string): Promise<void> {
   )
 }
 
+export async function updateLocalAccount(
+  id: string,
+  patch: { email?: string; password?: string; displayName?: string },
+): Promise<LocalAccount> {
+  const current = await findAccountById(id)
+  if (!current) throw new Error('local account not found')
+
+  const email = patch.email?.trim().toLowerCase() || current.email
+  const displayName =
+    patch.displayName?.trim() || current.display_name
+  const passwordHash = patch.password
+    ? hashPassword(patch.password)
+    : current.password_hash
+
+  await sql(
+    `update local_accounts
+     set email = $2, password_hash = $3, display_name = $4
+     where id = $1`,
+    [id, email, passwordHash, displayName],
+  )
+  const row = await findAccountById(id)
+  if (!row) throw new Error('local account update failed')
+  return row
+}
+
 export type LocalAccountRoleHint = {
   role: 'manager' | 'employee'
   employee_id: string | null

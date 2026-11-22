@@ -25,6 +25,8 @@ import {
   createLocalAccount,
   deleteLocalAccount,
   findAccountByEmail,
+  findAccountById,
+  updateLocalAccount,
 } from './localAuth'
 import { loadAppState, saveAppState } from './stateRepo'
 
@@ -647,15 +649,190 @@ export async function runAction(
     }
     case 'updateEmployee': {
       if (!isManager(session)) return fail('forbidden')
-      const { pin: _p, ...safePatch } = action.patch as Partial<Employee> & {
-        pin?: string
+      const emp = state.employees.find((e) => e.id === action.employeeId)
+      if (!emp) return fail('not_found', '구성원을 찾을 수 없습니다.')
+
+      const nextName =
+        action.patch.name !== undefined ? action.patch.name.trim() : emp.name
+      const nextDept =
+        action.patch.dept !== undefined ? action.patch.dept.trim() : emp.dept
+      const nextRole =
+        action.patch.role !== undefined
+          ? action.patch.role.trim() || '팀원'
+          : emp.role
+
+      if (!nextName || !nextDept) {
+        return fail('invalid', '이름과 부서를 입력해 주세요.')
       }
+      if (
+        state.employees.some(
+          (e) => e.id !== action.employeeId && e.name === nextName,
+        )
+      ) {
+        return fail('duplicate', '이미 등록된 이름입니다.')
+      }
+
+      const linkedRoles = await listRolesByEmployeeId(stage, action.employeeId)
+      const isManagerMember = linkedRoles.some((r) => r.role === 'manager')
+      const isSelf = linkedRoles.some((r) => r.cursor_sub === session.cursorSub)
+
+      // Keep manager profiles editable for name/dept, but avoid accidental
+      // self-lockout via blanking or reclaiming the only manager login.
+      const emailRaw = action.email?.trim().toLowerCase() ?? ''
+      const passwordRaw = action.password ?? ''
+      const wantsEmailChange = Boolean(emailRaw)
+      const wantsPasswordChange = Boolean(passwordRaw)
+
+      if (wantsPasswordChange && passwordRaw.length < 8) {
+        return fail('invalid', '비밀번호는 8자 이상이어야 합니다.')
+      }
+
+      if ((wantsEmailChange || wantsPasswordChange) && authMode() !== 'local') {
+        return fail(
+          'cursor_mode',
+          '이메일·비밀번호 변경은 로컬(AUTH_MODE=local)에서만 가능합니다.',
+        )
+      }
+
+      let localAccountId: string | null = null
+      if (authMode() === 'local') {
+        const localRole = linkedRoles.find((r) =>
+          r.cursor_sub.startsWith('local:'),
+        )
+        localAccountId = localRole?.cursor_sub ?? null
+
+        if (wantsEmailChange || wantsPasswordChange) {
+          if (localAccountId) {
+            const currentAccount = await findAccountById(localAccountId)
+            if (!currentAccount) {
+              return fail('not_found', '연결된 로그인 계정을 찾을 수 없습니다.')
+            }
+
+            if (wantsEmailChange && emailRaw !== currentAccount.email) {
+              const existing = await findAccountByEmail(emailRaw)
+              if (existing && existing.id !== localAccountId) {
+                const existingRole = await loadRole(stage, existing.id)
+                if (existingRole) {
+                  return fail(
+                    'email_taken',
+                    '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.',
+                  )
+                }
+                // Orphan invite account — reclaim email.
+                await deleteLocalAccount(existing.id)
+                state = {
+                  ...state,
+                  joinApplications: state.joinApplications.filter(
+                    (j) => j.applicantSub !== existing.id,
+                  ),
+                }
+              }
+            }
+
+            if (isSelf && isManagerMember && wantsEmailChange) {
+              // Allow email change for self-manager, but require a real address.
+              if (!emailRaw.includes('@')) {
+                return fail('invalid', '올바른 이메일을 입력해 주세요.')
+              }
+            }
+
+            await updateLocalAccount(localAccountId, {
+              email: wantsEmailChange ? emailRaw : undefined,
+              password: wantsPasswordChange ? passwordRaw : undefined,
+              displayName: nextName,
+            })
+          } else {
+            // No linked login yet — attach a new local account (like register).
+            if (!emailRaw || !passwordRaw || passwordRaw.length < 8) {
+              return fail(
+                'invalid',
+                '로그인 계정을 연결하려면 이메일과 8자 이상 비밀번호가 필요합니다.',
+              )
+            }
+            const existingAccount = await findAccountByEmail(emailRaw)
+            if (existingAccount) {
+              const existingRole = await loadRole(stage, existingAccount.id)
+              if (existingRole) {
+                return fail(
+                  'email_taken',
+                  '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.',
+                )
+              }
+              await deleteLocalAccount(existingAccount.id)
+              state = {
+                ...state,
+                joinApplications: state.joinApplications.filter(
+                  (j) => j.applicantSub !== existingAccount.id,
+                ),
+              }
+            }
+            if (isManagerMember) {
+              return fail(
+                'forbidden',
+                '관리자 계정 로그인은 이 화면에서 새로 연결할 수 없습니다.',
+              )
+            }
+            const account = await createLocalAccount({
+              email: emailRaw,
+              password: passwordRaw,
+              displayName: nextName,
+            })
+            await upsertRole({
+              stage,
+              cursorSub: account.id,
+              role: 'employee',
+              employeeId: action.employeeId,
+              displayName: nextName,
+            })
+            localAccountId = account.id
+          }
+        } else if (localAccountId && nextName !== emp.name) {
+          await updateLocalAccount(localAccountId, { displayName: nextName })
+        }
+      }
+
+      // Sync display_name on all linked roles.
+      for (const role of linkedRoles) {
+        if (role.display_name !== nextName) {
+          await upsertRole({
+            stage,
+            cursorSub: role.cursor_sub,
+            role: role.role,
+            employeeId: role.employee_id,
+            displayName: nextName,
+          })
+        }
+      }
+      // Newly created role already has nextName; also sync if we only had create path
+      // and linkedRoles was empty before create — already handled in createLocalAccount path.
+
       state = {
         ...state,
         employees: state.employees.map((e) =>
-          e.id === action.employeeId ? { ...e, ...safePatch } : e,
+          e.id === action.employeeId
+            ? {
+                ...e,
+                name: nextName,
+                dept: nextDept,
+                role: nextRole,
+                initials: initialsOf(nextName),
+              }
+            : e,
         ),
       }
+
+      const parts: string[] = []
+      if (nextName !== emp.name || nextDept !== emp.dept || nextRole !== emp.role) {
+        parts.push('프로필')
+      }
+      if (wantsEmailChange) parts.push('이메일')
+      if (wantsPasswordChange) parts.push('비밀번호')
+      message =
+        parts.length > 0
+          ? `${nextName} 구성원 ${parts.join('·')}을(를) 수정했습니다.`
+          : `${nextName} 구성원 정보를 저장했습니다.`
+      employeeId = action.employeeId
+      name = nextName
       break
     }
     default:

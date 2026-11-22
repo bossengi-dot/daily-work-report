@@ -1,6 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  composeWorkHistoryText,
+  downloadTextFile,
+  exportFilename,
+} from '../lib/exportText'
 import { composeChatSummary } from '../lib/pushMessage'
 import {
   isAttentionRow,
@@ -569,6 +574,20 @@ export function ManagerBoard() {
                           }}
                         >
                           채팅 푸시…
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const text = composeWorkHistoryText(
+                              selected.emp,
+                              state.reports,
+                            )
+                            downloadTextFile(exportFilename(selected.emp.name), text)
+                            showToast(`${selected.emp.name} 보고를 텍스트로 내보냈습니다.`)
+                            setMoreOpen(false)
+                          }}
+                        >
+                          텍스트로보내기
                         </button>
                       </div>
                     )}

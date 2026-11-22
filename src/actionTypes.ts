@@ -60,4 +60,13 @@ export type ClientAction =
   | { type: 'setManagerAck'; reportId: string; ack: ManagerAck }
   | { type: 'updateSettings'; patch: Partial<AppSettings> }
   | { type: 'setEmployeeOoo'; employeeId: string; ooo: OooPeriod | null }
-  | { type: 'updateEmployee'; employeeId: string; patch: Partial<Employee> }
+  | {
+      type: 'updateEmployee'
+      employeeId: string
+      /** Profile fields to update (name/dept/role). Omitted keys keep current values. */
+      patch: Partial<Pick<Employee, 'name' | 'dept' | 'role'>>
+      /** Local AUTH_MODE: change or attach login email */
+      email?: string
+      /** Local AUTH_MODE: optional password reset / set (8+ chars). Empty = no change. */
+      password?: string
+    }

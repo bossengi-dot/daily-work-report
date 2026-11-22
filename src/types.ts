@@ -105,7 +105,7 @@ export interface WeeklyTodo {
   status: ItemStatus | 'delayed'
 }
 
-/** Non-secret client settings only. Webhook/LLM secrets live in server env. */
+/** Non-secret client settings only. Webhook secrets live in server env. */
 export interface AppSettings {
   /** reserved — secrets are not stored client-side */
   _placeholder?: never

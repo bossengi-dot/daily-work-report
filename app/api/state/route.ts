@@ -12,8 +12,14 @@ export async function GET(request: Request) {
   if (identity instanceof Response) return identity
   const session = await resolveViewerSession(identity)
   if (!session.role) {
-    return jsonNoStore({ session, state: null })
+    // No role yet — still report whether this account has a pending join so the
+    // waiting screen can show status after refresh (without leaking full state).
+    const state = await loadAppState(session.stage)
+    const joinPending = state.joinApplications.some(
+      (j) => j.status === 'pending' && j.applicantSub === session.cursorSub,
+    )
+    return jsonNoStore({ session, state: null, joinPending })
   }
   const state = await loadAppState(session.stage)
-  return jsonNoStore({ session, state })
+  return jsonNoStore({ session, state, joinPending: false })
 }

@@ -1,5 +1,7 @@
 import {
+  deleteRole,
   jsonNoStore,
+  loadRole,
   resolveViewerSession,
 } from '../../../../src/server/auth'
 import {
@@ -7,12 +9,15 @@ import {
   authMode,
   consumeInviteCode,
   createLocalAccount,
+  deleteLocalAccount,
   ensureBootstrapManager,
   findAccountByEmail,
+  localAccountReclaimability,
   sessionCookieHeader,
   signSessionCookie,
   validateInviteCode,
 } from '../../../../src/server/localAuth'
+import { loadAppState, saveAppState } from '../../../../src/server/stateRepo'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,11 +62,52 @@ export async function POST(request: Request) {
     )
   }
 
-  if (await findAccountByEmail(email)) {
-    return jsonNoStore(
-      { ok: false, error: 'email_taken', message: '이미 등록된 이메일입니다.' },
-      409,
+  const existing = await findAccountByEmail(email)
+  if (existing) {
+    const stage = 'production' as const
+    const role = await loadRole(stage, existing.id)
+    const state = await loadAppState(stage)
+    const liveIds = new Set(state.employees.map((e) => e.id))
+    const reclaim = localAccountReclaimability(
+      role ? { role: role.role, employee_id: role.employee_id } : null,
+      liveIds,
     )
+    if (!reclaim.reclaimable) {
+      return jsonNoStore(
+        {
+          ok: false,
+          error: 'email_taken',
+          message:
+            reclaim.reason === 'manager'
+              ? '관리자 이메일입니다. 다른 이메일을 사용하세요.'
+              : '이미 등록된 이메일입니다.',
+        },
+        409,
+      )
+    }
+    // Free orphan / invite-only leftover so the same email can sign up again.
+    if (role) await deleteRole(stage, existing.id)
+    await deleteLocalAccount(existing.id)
+    if (role?.employee_id || state.joinApplications.some((j) => j.applicantSub === existing.id)) {
+      const next = {
+        ...state,
+        employees: role?.employee_id
+          ? state.employees.filter((e) => e.id !== role.employee_id)
+          : state.employees,
+        reports: role?.employee_id
+          ? state.reports.filter((r) => r.employeeId !== role.employee_id)
+          : state.reports,
+        weeklyTodos: role?.employee_id
+          ? state.weeklyTodos.filter((t) => t.assigneeId !== role.employee_id)
+          : state.weeklyTodos,
+        joinApplications: state.joinApplications.filter(
+          (j) =>
+            j.applicantSub !== existing.id &&
+            j.employeeId !== role?.employee_id,
+        ),
+      }
+      await saveAppState(stage, next)
+    }
   }
 
   const inviteCheck = await validateInviteCode(inviteCode)

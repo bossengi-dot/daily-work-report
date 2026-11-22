@@ -10,10 +10,12 @@ export function LoginScreen() {
     session,
     authError,
     authMode,
+    joinPending,
     submitJoinApplication,
     refresh,
     localLogin,
     localRegister,
+    logout,
   } = useStore()
   const [tab, setTab] = useState<LocalTab>('login')
   const [applyName, setApplyName] = useState(session?.displayName ?? '')
@@ -28,12 +30,22 @@ export function LoginScreen() {
   const [displayName, setDisplayName] = useState('')
   const [inviteCode, setInviteCode] = useState('')
 
+  const waitingForRole = applyDone || joinPending
+
   useEffect(() => {
     if (session?.displayName) setApplyName(session.displayName)
   }, [session?.displayName])
 
   useEffect(() => {
     if (session && !session.role) setTab('join')
+  }, [session])
+
+  useEffect(() => {
+    if (!session) {
+      setApplyDone(false)
+      setFormError(null)
+      setTab('login')
+    }
   }, [session])
 
   const doApply = async () => {
@@ -79,6 +91,13 @@ export function LoginScreen() {
       return
     }
     setTab('join')
+  }
+
+  const doLogout = async () => {
+    setBusy(true)
+    setFormError(null)
+    await logout()
+    setBusy(false)
   }
 
   if (authMode === 'local' && !session) {
@@ -279,20 +298,44 @@ export function LoginScreen() {
           <p style={{ marginBottom: 8, color: 'var(--danger, #b42318)' }}>{formError}</p>
         )}
 
-        {applyDone ? (
+        {waitingForRole ? (
           <div className="apply-done">
             <p style={{ margin: '0 0 8px', fontWeight: 600 }}>신청이 접수되었습니다.</p>
             <p className="hint" style={{ marginBottom: 12 }}>
-              관리자 승인 후 직원으로 이용할 수 있습니다.
+              관리자 승인 후 직원으로 이용할 수 있습니다. 승인됐다면 「상태 새로고침」을
+              누르세요.
             </p>
             <button
               type="button"
               className="btn btn-outline"
               style={{ width: '100%' }}
+              disabled={busy}
               onClick={() => void refresh()}
             >
               상태 새로고침
             </button>
+            {authMode === 'local' && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginTop: 8 }}
+                  disabled={busy}
+                  onClick={() => void doLogout()}
+                >
+                  로그아웃
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ width: '100%', marginTop: 4 }}
+                  disabled={busy}
+                  onClick={() => void doLogout()}
+                >
+                  로그인으로
+                </button>
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -339,10 +382,22 @@ export function LoginScreen() {
               type="button"
               className="btn btn-ghost"
               style={{ width: '100%', marginTop: 8 }}
+              disabled={busy}
               onClick={() => void refresh()}
             >
               새로고침
             </button>
+            {authMode === 'local' && (
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ width: '100%', marginTop: 8 }}
+                disabled={busy}
+                onClick={() => void doLogout()}
+              >
+                로그아웃
+              </button>
+            )}
           </>
         )}
       </div>

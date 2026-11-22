@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { generateBriefDraft } from '../lib/aiBrief'
+import { copyText } from '../lib/clipboard'
 import {
   deriveWeeklyTodos,
   deriveWeeklyTopics,
@@ -14,6 +15,7 @@ export function WeeklySummary() {
   const { state, getReport, showToast } = useStore()
   const { start, end } = state.weekRange
   const [briefOpen, setBriefOpen] = useState(true)
+  const briefPreviewRef = useRef<HTMLTextAreaElement>(null)
 
   const brief = useMemo(() => generateBriefDraft(state, 'week'), [state])
   const kpi = useMemo(() => weekKpi(state), [state])
@@ -97,12 +99,20 @@ export function WeeklySummary() {
             type="button"
             className="btn btn-primary btn-sm"
             onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(brief)
-                showToast('브리프를 클립보드에 복사했습니다.')
-              } catch {
-                showToast('복사 실패 — 텍스트를 직접 선택해 주세요.')
+              if (!briefOpen) {
+                setBriefOpen(true)
+                await new Promise<void>((resolve) => {
+                  requestAnimationFrame(() => resolve())
+                })
               }
+              const ok = await copyText(brief, {
+                selectElement: briefPreviewRef.current,
+              })
+              showToast(
+                ok
+                  ? '브리프를 클립보드에 복사했습니다.'
+                  : '복사 실패 — 텍스트를 직접 선택해 주세요.',
+              )
             }}
           >
             브리프 복사
@@ -110,7 +120,14 @@ export function WeeklySummary() {
         </div>
       </div>
       {briefOpen && (
-        <textarea className="push-preview panel" rows={14} readOnly value={brief} style={{ marginBottom: 16 }} />
+        <textarea
+          ref={briefPreviewRef}
+          className="push-preview panel"
+          rows={14}
+          readOnly
+          value={brief}
+          style={{ marginBottom: 16 }}
+        />
       )}
 
       <div className="weekly-layout">

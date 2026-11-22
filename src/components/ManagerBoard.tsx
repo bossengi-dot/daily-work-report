@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { copyText } from '../lib/clipboard'
 import {
   composeWorkHistoryText,
   downloadTextFile,
@@ -78,6 +79,7 @@ export function ManagerBoard() {
   const [revisionText, setRevisionText] = useState('')
   const [pushOpen, setPushOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const pushPreviewRef = useRef<HTMLTextAreaElement>(null)
 
   const todayReports = useMemo(
     () =>
@@ -596,18 +598,22 @@ export function ManagerBoard() {
 
                 {pushOpen && (
                   <div style={{ marginBottom: 8 }}>
-                    <textarea className="push-preview" rows={5} readOnly value={pushText} />
+                    <textarea
+                      ref={pushPreviewRef}
+                      className="push-preview"
+                      rows={5}
+                      readOnly
+                      value={pushText}
+                    />
                     <button
                       type="button"
                       className="btn btn-outline btn-sm"
                       style={{ marginTop: 4 }}
                       onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(pushText)
-                          showToast('복사했습니다.')
-                        } catch {
-                          showToast('복사 실패')
-                        }
+                        const ok = await copyText(pushText, {
+                          selectElement: pushPreviewRef.current,
+                        })
+                        showToast(ok ? '복사했습니다.' : '복사 실패')
                       }}
                     >
                       복사

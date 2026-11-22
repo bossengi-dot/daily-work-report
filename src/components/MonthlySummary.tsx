@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { generateBriefDraft } from '../lib/aiBrief'
+import { copyText } from '../lib/clipboard'
 import {
   deriveTodosForRange,
   deriveTopicsForRange,
@@ -13,6 +14,7 @@ export function MonthlySummary() {
   const { state, showToast } = useStore()
   const { start, end } = state.monthRange
   const [brief, setBrief] = useState('')
+  const briefPreviewRef = useRef<HTMLTextAreaElement>(null)
 
   const kpi = useMemo(() => rangeKpi(state, start, end), [state, start, end])
   const topics = useMemo(() => deriveTopicsForRange(state, start, end), [state, start, end])
@@ -105,12 +107,12 @@ export function MonthlySummary() {
               type="button"
               className="btn btn-primary btn-sm"
               onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(brief)
-                  showToast('브리프를 복사했습니다.')
-                } catch {
-                  showToast('복사 실패 — 텍스트를 선택해 주세요.')
-                }
+                const ok = await copyText(brief, {
+                  selectElement: briefPreviewRef.current,
+                })
+                showToast(
+                  ok ? '브리프를 복사했습니다.' : '복사 실패 — 텍스트를 선택해 주세요.',
+                )
               }}
             >
               복사
@@ -120,6 +122,7 @@ export function MonthlySummary() {
       </div>
       {brief && (
         <textarea
+          ref={briefPreviewRef}
           className="push-preview panel"
           rows={12}
           readOnly

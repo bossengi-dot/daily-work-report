@@ -15,6 +15,7 @@ import { createSeed } from '../seed'
 import type { ViewerSession } from './auth'
 import {
   deleteRole,
+  listRoles,
   listRolesByEmployeeId,
   loadRole,
   upsertRole,
@@ -26,6 +27,7 @@ import {
   deleteLocalAccount,
   findAccountByEmail,
   findAccountById,
+  localAccountReclaimability,
   updateLocalAccount,
 } from './localAuth'
 import { loadAppState, saveAppState } from './stateRepo'
@@ -43,6 +45,37 @@ function uid(prefix: string) {
 
 function initialsOf(name: string): string {
   return name.trim().slice(0, 1) || '?'
+}
+
+function liveEmployeeIdSet(state: AppState): Set<string> {
+  return new Set(state.employees.map((e) => e.id))
+}
+
+/** Remove an employee profile and related app_state rows (roles/accounts handled separately). */
+function purgeEmployeeFromState(state: AppState, employeeId: string): AppState {
+  return {
+    ...state,
+    employees: state.employees.filter((e) => e.id !== employeeId),
+    reports: state.reports.filter((r) => r.employeeId !== employeeId),
+    weeklyTodos: state.weeklyTodos.filter((t) => t.assigneeId !== employeeId),
+    joinApplications: state.joinApplications.filter((j) => j.employeeId !== employeeId),
+  }
+}
+
+/** Delete local account + role for a cursor_sub; clear join apps that referenced it. */
+async function purgeLocalIdentity(
+  stage: AppStage,
+  state: AppState,
+  cursorSub: string,
+): Promise<AppState> {
+  await deleteRole(stage, cursorSub)
+  if (authMode() === 'local' && cursorSub.startsWith('local:')) {
+    await deleteLocalAccount(cursorSub)
+  }
+  return {
+    ...state,
+    joinApplications: state.joinApplications.filter((j) => j.applicantSub !== cursorSub),
+  }
 }
 
 export type ActionResult = {
@@ -106,6 +139,15 @@ export async function runAction(
   switch (action.type) {
     case 'resetSeed': {
       if (!isManager(session)) return fail('forbidden')
+      // Drop non-manager roles and their local accounts so seed reset does not
+      // leave emails that block later admin re-registration.
+      if (authMode() === 'local') {
+        const roles = await listRoles(stage)
+        for (const role of roles) {
+          if (role.role === 'manager') continue
+          state = await purgeLocalIdentity(stage, state, role.cursor_sub)
+        }
+      }
       state = { ...createSeed(), settings: { ...DEFAULT_SETTINGS } }
       message = '시드 데이터로 초기화했습니다.'
       break
@@ -239,8 +281,19 @@ export async function runAction(
       const empName = action.name.trim()
       const dept = action.dept.trim()
       if (!empName || !dept) return fail('invalid', '이름과 부서를 입력해 주세요.')
-      if (state.employees.some((e) => e.name === empName)) {
-        return fail('duplicate', '이미 등록된 이름입니다.')
+
+      // Same name as an unlinked seed/demo profile → overwrite that slot.
+      // Linked (has login role) names still require delete first.
+      const sameName = state.employees.find((e) => e.name === empName)
+      if (sameName) {
+        const nameRoles = await listRolesByEmployeeId(stage, sameName.id)
+        if (nameRoles.length > 0) {
+          return fail(
+            'duplicate',
+            '이미 등록된 이름입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.',
+          )
+        }
+        state = purgeEmployeeFromState(state, sameName.id)
       }
 
       const email = action.email?.trim().toLowerCase() ?? ''
@@ -263,20 +316,27 @@ export async function runAction(
         const existingAccount = await findAccountByEmail(email)
         if (existingAccount) {
           const existingRole = await loadRole(stage, existingAccount.id)
-          if (existingRole) {
-            return fail(
-              'email_taken',
-              '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.',
-            )
+          const reclaim = localAccountReclaimability(
+            existingRole
+              ? {
+                  role: existingRole.role,
+                  employee_id: existingRole.employee_id,
+                }
+              : null,
+            liveEmployeeIdSet(state),
+          )
+          if (!reclaim.reclaimable) {
+            const msg =
+              reclaim.reason === 'manager'
+                ? '관리자 이메일입니다. 다른 이메일을 사용하세요.'
+                : '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.'
+            return fail('email_taken', msg)
           }
-          // Invite-created account that never got a role — reclaim email.
-          await deleteLocalAccount(existingAccount.id)
-          state = {
-            ...state,
-            joinApplications: state.joinApplications.filter(
-              (j) => j.applicantSub !== existingAccount.id,
-            ),
+          // Invite-only or orphan role (employee gone) — free email for recreate.
+          if (existingRole?.employee_id) {
+            state = purgeEmployeeFromState(state, existingRole.employee_id)
           }
+          state = await purgeLocalIdentity(stage, state, existingAccount.id)
         }
       }
 
@@ -347,27 +407,11 @@ export async function runAction(
       }
 
       for (const role of linkedRoles) {
-        await deleteRole(stage, role.cursor_sub)
-        if (authMode() === 'local' && role.cursor_sub.startsWith('local:')) {
-          await deleteLocalAccount(role.cursor_sub)
-        }
+        state = await purgeLocalIdentity(stage, state, role.cursor_sub)
       }
 
-      // Orphan local accounts that only had a pending join (no employee_id yet)
-      // are not tied here; join cleanup below clears applicant references.
-
-      const removedSubs = new Set(linkedRoles.map((r) => r.cursor_sub))
-      state = {
-        ...state,
-        employees: state.employees.filter((e) => e.id !== targetId),
-        reports: state.reports.filter((r) => r.employeeId !== targetId),
-        weeklyTodos: state.weeklyTodos.filter((t) => t.assigneeId !== targetId),
-        joinApplications: state.joinApplications.filter((j) => {
-          if (j.employeeId === targetId) return false
-          if (j.applicantSub && removedSubs.has(j.applicantSub)) return false
-          return true
-        }),
-      }
+      // Also drop join apps that only referenced this employee id (no account).
+      state = purgeEmployeeFromState(state, targetId)
       message = `${emp.name} 구성원과 연결된 계정·보고 데이터를 삭제했습니다.`
       name = emp.name
       employeeId = targetId
@@ -712,20 +756,26 @@ export async function runAction(
               const existing = await findAccountByEmail(emailRaw)
               if (existing && existing.id !== localAccountId) {
                 const existingRole = await loadRole(stage, existing.id)
-                if (existingRole) {
-                  return fail(
-                    'email_taken',
-                    '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.',
-                  )
+                const reclaim = localAccountReclaimability(
+                  existingRole
+                    ? {
+                        role: existingRole.role,
+                        employee_id: existingRole.employee_id,
+                      }
+                    : null,
+                  liveEmployeeIdSet(state),
+                )
+                if (!reclaim.reclaimable) {
+                  const msg =
+                    reclaim.reason === 'manager'
+                      ? '관리자 이메일입니다. 다른 이메일을 사용하세요.'
+                      : '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.'
+                  return fail('email_taken', msg)
                 }
-                // Orphan invite account — reclaim email.
-                await deleteLocalAccount(existing.id)
-                state = {
-                  ...state,
-                  joinApplications: state.joinApplications.filter(
-                    (j) => j.applicantSub !== existing.id,
-                  ),
+                if (existingRole?.employee_id) {
+                  state = purgeEmployeeFromState(state, existingRole.employee_id)
                 }
+                state = await purgeLocalIdentity(stage, state, existing.id)
               }
             }
 
@@ -752,19 +802,26 @@ export async function runAction(
             const existingAccount = await findAccountByEmail(emailRaw)
             if (existingAccount) {
               const existingRole = await loadRole(stage, existingAccount.id)
-              if (existingRole) {
-                return fail(
-                  'email_taken',
-                  '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.',
-                )
+              const reclaim = localAccountReclaimability(
+                existingRole
+                  ? {
+                      role: existingRole.role,
+                      employee_id: existingRole.employee_id,
+                    }
+                  : null,
+                liveEmployeeIdSet(state),
+              )
+              if (!reclaim.reclaimable) {
+                const msg =
+                  reclaim.reason === 'manager'
+                    ? '관리자 이메일입니다. 다른 이메일을 사용하세요.'
+                    : '이미 등록된 이메일입니다. 구성원 목록에서 삭제한 뒤 다시 등록하세요.'
+                return fail('email_taken', msg)
               }
-              await deleteLocalAccount(existingAccount.id)
-              state = {
-                ...state,
-                joinApplications: state.joinApplications.filter(
-                  (j) => j.applicantSub !== existingAccount.id,
-                ),
+              if (existingRole?.employee_id) {
+                state = purgeEmployeeFromState(state, existingRole.employee_id)
               }
+              state = await purgeLocalIdentity(stage, state, existingAccount.id)
             }
             if (isManagerMember) {
               return fail(

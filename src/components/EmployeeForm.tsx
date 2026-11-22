@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { copyText } from '../lib/clipboard'
 import { isSafeAttachmentUrl } from '../lib/safeUrl'
 import { composeChatSummary } from '../lib/pushMessage'
 import { employeeStatusLabel } from '../lib/statusLabels'
@@ -178,6 +179,7 @@ export function EmployeeForm() {
   const [planCollapsed, setPlanCollapsed] = useState(false)
   const [execCollapsed, setExecCollapsed] = useState(false)
   const instrRef = useRef<HTMLDivElement>(null)
+  const pushPreviewRef = useRef<HTMLTextAreaElement>(null)
 
   const pushText = useMemo(() => {
     if (!employee || !report) return ''
@@ -684,7 +686,13 @@ export function EmployeeForm() {
                 <p className="hint" style={{ marginBottom: 8 }}>
                   요약 복사. 서버 웹훅(NW_WEBHOOK_URL)이 있으면 관리자 API로만 전송합니다.
                 </p>
-                <textarea className="push-preview" rows={10} readOnly value={pushText} />
+                <textarea
+                  ref={pushPreviewRef}
+                  className="push-preview"
+                  rows={10}
+                  readOnly
+                  value={pushText}
+                />
                 <button
                   type="button"
                   className="btn btn-primary"
@@ -692,12 +700,14 @@ export function EmployeeForm() {
                   disabled={pushing}
                   onClick={async () => {
                     setPushing(true)
-                    try {
-                      await navigator.clipboard.writeText(pushText)
-                      showToast('요약을 클립보드에 복사했습니다.')
-                    } catch {
-                      showToast('복사 실패 — 텍스트를 직접 선택해 주세요.')
-                    }
+                    const ok = await copyText(pushText, {
+                      selectElement: pushPreviewRef.current,
+                    })
+                    showToast(
+                      ok
+                        ? '요약을 클립보드에 복사했습니다.'
+                        : '복사 실패 — 텍스트를 직접 선택해 주세요.',
+                    )
                     setPushing(false)
                   }}
                 >

@@ -38,6 +38,19 @@ docker compose up -d --build
 브라우저: `http://NAS주소:3080`  
 첫 관리자: `.env` 의 `BOOTSTRAP_MANAGER_EMAIL` / `BOOTSTRAP_MANAGER_PASSWORD`
 
+## Optional: OpenAI brief
+
+관리자 주간/월간 브리프는 기본적으로 규칙 기반(휴리스틱)입니다.  
+서버에 `OPENAI_API_KEY` 가 있으면 Chat Completions로 다듬고, 실패 시 휴리스틱으로 돌아갑니다.
+
+| 변수 | 필수 | 설명 |
+|------|------|------|
+| `OPENAI_API_KEY` | 아니오 | 서버 전용. 클라이언트/`NEXT_PUBLIC_` 로 넣지 마세요 |
+| `OPENAI_MODEL` | 아니오 | 기본 `gpt-4o-mini` |
+
+- Cursor 호스팅: Dashboard Secrets에 `OPENAI_API_KEY` 값 설정 후 앱에 바인딩
+- NAS: `.env`에 넣고 `docker compose` 가 `environment`로 전달
+
 ## Build
 
 ```bash

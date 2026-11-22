@@ -1,7 +1,7 @@
 import type { AppState } from '../types'
 import { deriveWeeklyTodos, deriveWeeklyTopics, employeeName, weekKpi } from './weekly'
 
-/** 로컬 휴리스틱 주간 브리프 (외부 API 없음) */
+/** 규칙 기반 주간 브리프 초안. LLM 다듬기는 서버(openaiBrief)에서만 수행. */
 export function generateWeeklyBrief(state: AppState): string {
   const kpi = weekKpi(state)
   const topics = deriveWeeklyTopics(state)

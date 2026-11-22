@@ -13,7 +13,8 @@ export function MonthlySummary() {
   const { state, showToast } = useStore()
   const { start, end } = state.monthRange
   const [brief, setBrief] = useState('')
-  const [briefMode, setBriefMode] = useState('')
+  const [briefMode, setBriefMode] = useState<'llm' | 'heuristic' | ''>('')
+  const [briefDetail, setBriefDetail] = useState('')
   const [loading, setLoading] = useState(false)
 
   const kpi = useMemo(() => rangeKpi(state, start, end), [state, start, end])
@@ -37,20 +38,14 @@ export function MonthlySummary() {
 
   const loadBrief = async () => {
     setLoading(true)
-    // monthly brief: reuse heuristic with month range temporarily swapped
-    const monthState = {
-      ...state,
-      weekRange: { start, end },
-    }
-    const result = await tryGenerateBrief(monthState)
-    setBrief(
-      result.text.startsWith('주간')
-        ? result.text.replace('주간 업무 브리프', '월간 업무 브리프')
-        : `월간 업무 브리프 초안 (${start} ~ ${end})\n\n` + result.text,
-    )
-    setBriefMode(result.detail)
+    const result = await tryGenerateBrief(state, { period: 'month' })
+    setBrief(result.text)
+    setBriefMode(result.mode)
+    setBriefDetail(result.detail)
     setLoading(false)
-    showToast(result.detail)
+    showToast(
+      `${result.mode === 'llm' ? 'LLM' : '휴리스틱'} · ${result.detail}`,
+    )
   }
 
   return (
@@ -104,7 +99,10 @@ export function MonthlySummary() {
         <div>
           <strong>사람 검토 후 발송</strong>
           <p className="hint" style={{ margin: '4px 0 0' }}>
-            {briefMode || 'LLM 설정 시 시도 · 없으면 휴리스틱'} · 시드 월 데이터는 9/14~17 중심
+            {briefMode
+              ? `${briefMode === 'llm' ? 'LLM' : '휴리스틱'} · ${briefDetail}`
+              : 'LLM 설정 시 시도 · 없으면 휴리스틱'}{' '}
+            · 시드 월 데이터는 9/14~17 중심
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

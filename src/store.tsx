@@ -55,7 +55,9 @@ interface StoreValue {
   showToast: (message: string) => void
   refresh: () => Promise<void>
   resetSeed: () => Promise<void>
-  logout: () => void
+  logout: () => Promise<void> | void
+  /** True when signed-in account has a pending join application (no role yet). */
+  joinPending: boolean
   localLogin: (
     email: string,
     password: string,
@@ -163,6 +165,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<RoleView>('employee')
   const [actingAsEmployeeId, setActingAsEmployeeId] = useState('e1')
   const [toast, setToast] = useState<Toast | null>(null)
+  const [joinPending, setJoinPending] = useState(false)
 
   const showToast = useCallback((message: string) => {
     const id = Date.now()
@@ -212,6 +215,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setAuthError('로그인이 필요합니다. Cursor 계정으로 앱을 열어 주세요.')
       }
       setSession(null)
+      setJoinPending(false)
       setReady(true)
       return
     }
@@ -220,9 +224,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setReady(true)
       return
     }
-    const data = (await res.json()) as { session: Session; state: AppState | null }
+    const data = (await res.json()) as {
+      session: Session
+      state: AppState | null
+      joinPending?: boolean
+    }
     setAuthError(null)
     applySession(data.session)
+    setJoinPending(Boolean(data.joinPending) && !data.session.role)
     if (data.state) {
       setState(data.state)
       if (!data.session.employeeId && data.state.employees[0]) {
@@ -328,14 +337,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return { ok: true, code: data.code }
   }, [showToast])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     if (authMode === 'local') {
-      void (async () => {
-        await fetch('/api/auth/logout', { method: 'POST' })
-        setSession(null)
-        setAuthError(null)
-        showToast('로그아웃했습니다.')
-      })()
+      try {
+        await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' })
+      } catch {
+        /* still clear client session */
+      }
+      setSession(null)
+      setJoinPending(false)
+      setAuthError(null)
+      showToast('로그아웃했습니다.')
       return
     }
     showToast('Cursor 앱 접근을 종료하려면 창을 닫아 주세요. (서버 역할은 유지됩니다)')
@@ -524,6 +536,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         dept: input.dept,
         memo: input.memo,
       })
+      if (result.ok) setJoinPending(true)
       return result.ok
     },
     [run],
@@ -623,6 +636,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       actingAsEmployeeId,
       setActingAsEmployeeId,
       toast,
+      joinPending,
       showToast,
       refresh,
       resetSeed,
@@ -669,6 +683,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       view,
       actingAsEmployeeId,
       toast,
+      joinPending,
       showToast,
       refresh,
       resetSeed,

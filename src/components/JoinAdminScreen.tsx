@@ -170,7 +170,7 @@ export function JoinAdminScreen() {
           </div>
           <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
             {authMode === 'local'
-              ? '이름·부서·이메일·비밀번호로 계정을 만들면 바로 로그인하고 일일보고를 작성할 수 있습니다.'
+              ? '이름·부서·이메일·비밀번호로 계정을 만들면 바로 로그인하고 일일보고를 작성할 수 있습니다. 삭제한 이메일·미연결(시드) 이름은 다시 쓸 수 있습니다.'
               : '직원 프로필만 만듭니다. 본인 로그인은 해당 사용자가 Cursor로 가입 신청 후 승인받아야 합니다.'}
           </p>
           <div className={`join-direct-grid ${authMode === 'local' ? 'join-direct-grid-local' : ''}`}>

@@ -91,6 +91,31 @@ export async function deleteLocalAccount(id: string): Promise<void> {
   )
 }
 
+export type LocalAccountRoleHint = {
+  role: 'manager' | 'employee'
+  employee_id: string | null
+} | null
+
+/**
+ * Decide whether an existing local account email can be reclaimed for a new
+ * registration. Orphans (invite-only / role pointing at a deleted employee)
+ * are reclaimable; live manager/employee bindings are not.
+ */
+export function localAccountReclaimability(
+  role: LocalAccountRoleHint,
+  liveEmployeeIds: ReadonlySet<string>,
+):
+  | { reclaimable: true; reason: 'no_role' | 'orphan_employee' }
+  | { reclaimable: false; reason: 'manager' | 'active_employee' } {
+  if (!role) return { reclaimable: true, reason: 'no_role' }
+  if (role.role === 'manager') return { reclaimable: false, reason: 'manager' }
+  if (role.employee_id && liveEmployeeIds.has(role.employee_id)) {
+    return { reclaimable: false, reason: 'active_employee' }
+  }
+  // Role row left behind after employee was removed from app_state, or employee_id null.
+  return { reclaimable: true, reason: 'orphan_employee' }
+}
+
 /** Create bootstrap manager from env once, if no managers exist. */
 export async function ensureBootstrapManager(
   stage: 'production' | 'preview' = 'production',

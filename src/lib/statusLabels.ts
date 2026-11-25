@@ -56,7 +56,9 @@ export function isAttentionRow(
   if (isOooOn(emp, currentDate)) return false
   const st = managerDisplayStatus(emp, report, currentDate)
   if (st === 'morning_only' || st === 'missing' || st === 'revision') return true
-  const blockers = [...report.execution, ...report.carryover].some((i) => i.status === 'blocker')
+  const blockers = [...(report.progress ?? []), ...report.execution, ...report.carryover].some(
+    (i) => i.status === 'blocker',
+  )
   if (blockers) return true
   if (report.instructions.some((i) => i.reflect === 'unreflected')) return true
   return false

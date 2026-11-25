@@ -44,7 +44,7 @@ function matchTopic(text: string): string | null {
 }
 
 function allItems(r: DailyReport): WorkItem[] {
-  return [...r.plan, ...r.execution, ...r.carryover]
+  return [...r.plan, ...(r.progress ?? []), ...r.execution, ...r.carryover]
 }
 
 export function deriveTopicsForRange(
@@ -119,6 +119,7 @@ export function deriveTodosForRange(
 
   for (const r of endReports) {
     const candidates = [
+      ...(r.progress ?? []).filter((i) => i.status !== 'done'),
       ...r.execution.filter((i) => i.status === 'in_progress' || i.status === 'blocker'),
       ...r.carryover.filter((i) => i.status !== 'done'),
     ]
@@ -206,7 +207,7 @@ export function rangeKpi(state: AppState, start: string, end: string) {
       if (['submitted', 'reviewing', 'done'].includes(report.status) || report.execSubmittedAt) {
         submitted += 1
       }
-      blockers += [...report.execution, ...report.carryover].filter(
+      blockers += [...(report.progress ?? []), ...report.execution, ...report.carryover].filter(
         (i) => i.status === 'blocker',
       ).length
       carries += report.carryover.filter((c) => (c.consecutiveDays ?? 0) >= 3).length

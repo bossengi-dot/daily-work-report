@@ -35,7 +35,9 @@ type FilterKey =
   | 'all'
 
 function blockersOf(report: DailyReport): WorkItem[] {
-  return [...report.execution, ...report.carryover].filter((i) => i.status === 'blocker')
+  return [...(report.progress ?? []), ...report.execution, ...report.carryover].filter(
+    (i) => i.status === 'blocker',
+  )
 }
 
 function maxCarry(report: DailyReport) {
@@ -324,6 +326,7 @@ export function ManagerBoard() {
                 const st = managerDisplayStatus(emp, report, state.currentDate)
                 const planSummary =
                   report.plan[0]?.text ??
+                  report.progress?.[0]?.text ??
                   report.execution[0]?.text ??
                   report.carryover[0]?.text ??
                   '—'
@@ -492,6 +495,28 @@ export function ManagerBoard() {
                     <ul>
                       {selected.report.plan.map((p) => (
                         <li key={p.id}>{p.text}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="side-section">
+                  <h3>진행</h3>
+                  {(selected.report.progress ?? []).length === 0 ? (
+                    <div className="hint">진행 없음</div>
+                  ) : (
+                    <ul>
+                      {(selected.report.progress ?? []).map((x) => (
+                        <li key={x.id}>
+                          {x.text}{' '}
+                          {x.status === 'blocker' && (
+                            <span className="badge badge-blocker">블로커</span>
+                          )}
+                          {x.status !== 'blocker' && (
+                            <span className="badge badge-progress">진행</span>
+                          )}
+                          {x.isAdHoc && <span className="ad-hoc-tag">계획 외</span>}
+                        </li>
                       ))}
                     </ul>
                   )}

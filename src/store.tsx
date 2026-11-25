@@ -78,21 +78,26 @@ interface StoreValue {
   checkPlanItem: (reportId: string, planItemId: string) => Promise<void>
   addPlanItem: (reportId: string, text: string) => Promise<void>
   addAdHocExecution: (reportId: string, text: string) => Promise<void>
+  moveWorkItem: (
+    reportId: string,
+    itemId: string,
+    to: 'plan' | 'progress' | 'execution' | 'carryover',
+  ) => Promise<void>
   updateWorkItem: (
     reportId: string,
-    section: 'plan' | 'execution' | 'carryover',
+    section: 'plan' | 'progress' | 'execution' | 'carryover',
     itemId: string,
     patch: Partial<WorkItem>,
   ) => Promise<void>
   addAttachmentUrl: (
     reportId: string,
-    section: 'plan' | 'execution' | 'carryover',
+    section: 'plan' | 'progress' | 'execution' | 'carryover',
     itemId: string,
     url: string,
   ) => Promise<void>
   addLocalFileAttachment: (
     reportId: string,
-    section: 'plan' | 'execution' | 'carryover',
+    section: 'plan' | 'progress' | 'execution' | 'carryover',
     itemId: string,
     file: File,
   ) => void
@@ -426,10 +431,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [run],
   )
 
+  const moveWorkItem = useCallback(
+    async (
+      reportId: string,
+      itemId: string,
+      to: 'plan' | 'progress' | 'execution' | 'carryover',
+    ) => {
+      await run({ type: 'moveWorkItem', reportId, itemId, to })
+    },
+    [run],
+  )
+
   const updateWorkItem = useCallback(
     async (
       reportId: string,
-      section: 'plan' | 'execution' | 'carryover',
+      section: 'plan' | 'progress' | 'execution' | 'carryover',
       itemId: string,
       patch: Partial<WorkItem>,
     ) => {
@@ -441,7 +457,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addAttachmentUrl = useCallback(
     async (
       reportId: string,
-      section: 'plan' | 'execution' | 'carryover',
+      section: 'plan' | 'progress' | 'execution' | 'carryover',
       itemId: string,
       url: string,
     ) => {
@@ -451,7 +467,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const addLocalFileAttachment = useCallback(
-    (_reportId: string, _section: 'plan' | 'execution' | 'carryover', _itemId: string, file: File) => {
+    (_reportId: string, _section: 'plan' | 'progress' | 'execution' | 'carryover', _itemId: string, file: File) => {
       const maxBytes = 5 * 1024 * 1024
       if (file.size > maxBytes) {
         showToast('5MB 이하 파일만 미리보기할 수 있습니다.')
@@ -668,6 +684,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       checkPlanItem,
       addPlanItem,
       addAdHocExecution,
+      moveWorkItem,
       updateWorkItem,
       addAttachmentUrl,
       addLocalFileAttachment,
@@ -715,6 +732,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       checkPlanItem,
       addPlanItem,
       addAdHocExecution,
+      moveWorkItem,
       updateWorkItem,
       addAttachmentUrl,
       addLocalFileAttachment,

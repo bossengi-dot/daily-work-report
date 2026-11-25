@@ -31,13 +31,36 @@ function item(
   status?: ItemStatus,
   extra: Partial<WorkItem> = {},
 ): WorkItem {
+  const { hours: _hours, ...rest } = extra
   return {
     id,
     text,
     status,
-    hours: extra.hours ?? 1,
-    attachments: extra.attachments ?? [],
-    ...extra,
+    attachments: rest.attachments ?? [],
+    ...rest,
+  }
+}
+
+/** Ensure progress section exists; split mixed execution when needed. */
+function withSections(
+  report: Omit<DailyReport, 'progress'> & { progress?: WorkItem[] },
+): DailyReport {
+  if (Array.isArray(report.progress)) {
+    return {
+      ...report,
+      plan: report.plan ?? [],
+      progress: report.progress,
+      execution: report.execution ?? [],
+      carryover: report.carryover ?? [],
+    }
+  }
+  const mixed = report.execution ?? []
+  return {
+    ...report,
+    plan: report.plan ?? [],
+    progress: mixed.filter((i) => i.status !== 'done'),
+    execution: mixed.filter((i) => i.status === 'done'),
+    carryover: report.carryover ?? [],
   }
 }
 
@@ -154,7 +177,7 @@ function histReport(
   const isPark = employeeId === 'e1'
   const carryDays = isPark ? 2 + dayIndex : empIndex % 3 === 0 ? 1 + (dayIndex % 3) : 0
 
-  return {
+  return withSections({
     id: `hist-${date}-${employeeId}`,
     employeeId,
     date,
@@ -165,9 +188,8 @@ function histReport(
     submittedAt: `${date} 17:05`,
     plan: [],
     execution: [
-      item(`hx-${date}-${employeeId}-1`, topic, 'done', { hours: 2 }),
+      item(`hx-${date}-${employeeId}-1`, topic, 'done'),
       item(`hx-${date}-${employeeId}-2`, topic2, dayIndex === 2 && empIndex < 3 ? 'blocker' : 'done', {
-        hours: 1.5,
         ...(dayIndex === 2 && empIndex < 3
           ? {
               blockerReason: '협력사 회신 지연',
@@ -207,14 +229,13 @@ function histReport(
           ]
         : [],
     instructions: [],
-  }
+  })
 }
 
 function todayReport(emp: Employee, empIndex: number): DailyReport {
   const profile = TODAY_PROFILE[emp.id]
   const basePlan = [
     item(`p-${emp.id}-1`, TOPIC_LINES[empIndex % TOPIC_LINES.length], undefined, {
-      hours: 2,
       checked: false,
       attachments:
         emp.id === 'e1'
@@ -229,48 +250,48 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
           : [],
     }),
     item(`p-${emp.id}-2`, TOPIC_LINES[(empIndex + 2) % TOPIC_LINES.length], undefined, {
-      hours: 1,
       checked: false,
     }),
   ]
 
-  const empty: DailyReport = {
+  // progress omitted on purpose — withSections() partitions mixed execution
+  const empty = {
     id: `r-today-${emp.id}`,
     employeeId: emp.id,
     date: TODAY,
-    status: 'draft',
+    status: 'draft' as const,
     memo: '',
     plan: basePlan,
-    execution: [],
-    carryover: [],
-    instructions: [],
+    execution: [] as WorkItem[],
+    carryover: [] as WorkItem[],
+    instructions: [] as DailyReport['instructions'],
   }
 
   switch (profile) {
     case 'ooo':
-      return {
+      return withSections({
         ...empty,
         status: 'draft',
         memo: '부재 — 제출 면제',
         plan: basePlan,
-      }
+      })
     case 'morning_only':
-      return {
+      return withSections({
         ...empty,
         status: 'draft',
         planSubmittedAt: `${TODAY} 09:25`,
         memo: '오전 계획만 제출, 저녁 마감 전',
         plan: basePlan,
-      }
+      })
     case 'missing':
-      return {
+      return withSections({
         ...empty,
         status: 'draft',
         memo: '',
         plan: basePlan,
-      }
+      })
     case 'done_clean':
-      return {
+      return withSections({
         ...empty,
         status: 'done',
         planSubmittedAt: `${TODAY} 09:00`,
@@ -280,7 +301,6 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
         plan: [basePlan[1]],
         execution: [
           item(`x-${emp.id}-1`, `${TOPIC_LINES[empIndex]} 완료`, 'done', {
-            hours: 3,
             fromPlanId: basePlan[0].id,
           }),
         ],
@@ -293,9 +313,9 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
             reflect: 'reflected',
           },
         ],
-      }
+      })
     case 'submitted_ok':
-      return {
+      return withSections({
         ...empty,
         status: 'submitted',
         planSubmittedAt: `${TODAY} 09:15`,
@@ -303,32 +323,30 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
         submittedAt: `${TODAY} 17:00`,
         plan: [],
         execution: [
-          item(`x-${emp.id}-1`, '입출고 현황 정리', 'done', { hours: 2 }),
-          item(`x-${emp.id}-2`, '컨테이너 견적 전화', 'in_progress', { hours: 1 }),
+          item(`x-${emp.id}-1`, '입출고 현황 정리', 'done'),
+          item(`x-${emp.id}-2`, '컨테이너 견적 전화', 'in_progress'),
         ],
         carryover: [],
         instructions: [],
-      }
+      })
     case 'submitted_carry':
-      return {
+      return withSections({
         ...empty,
         status: 'submitted',
         planSubmittedAt: `${TODAY} 09:05`,
         execSubmittedAt: `${TODAY} 17:20`,
         submittedAt: `${TODAY} 17:20`,
         plan: [basePlan[1]],
-        execution: [
-          item(`x-${emp.id}-1`, '설비 일상점검', 'done', { hours: 2 }),
-        ],
+        execution: [item(`x-${emp.id}-1`, '설비 일상점검', 'done')],
         carryover: [
           item(`c-${emp.id}-1`, '예비품 재고 실사', 'in_progress', {
             consecutiveDays: 3,
           }),
         ],
         instructions: [],
-      }
+      })
     case 'reviewing_blocker':
-      return {
+      return withSections({
         ...empty,
         status: 'reviewing',
         planSubmittedAt: `${TODAY} 09:05`,
@@ -337,7 +355,6 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
         plan: [],
         execution: [
           item(`x-${emp.id}-1`, '기아차 펌프 소모품 교체 완료', 'done', {
-            hours: 3,
             attachments: [
               {
                 id: 'a-kia',
@@ -348,7 +365,6 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
             ],
           }),
           item(`x-${emp.id}-2`, 'KTR 커플링 납기 확인', 'blocker', {
-            hours: 0.5,
             blockerReason: '공급사 회신 지연 (발주 9/7)',
             supportRequest: '사장 명의 독촉 메일 검토',
           }),
@@ -366,9 +382,9 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
             reflect: 'reflected',
           },
         ],
-      }
+      })
     case 'reviewing_unreflected':
-      return {
+      return withSections({
         ...empty,
         status: 'reviewing',
         planSubmittedAt: `${TODAY} 09:30`,
@@ -376,8 +392,8 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
         submittedAt: `${TODAY} 17:05`,
         plan: [],
         execution: [
-          item(`x-${emp.id}-1`, '주간 기획 회의록 정리', 'done', { hours: 2 }),
-          item(`x-${emp.id}-2`, 'KPI 대시보드 초안', 'in_progress', { hours: 2 }),
+          item(`x-${emp.id}-1`, '주간 기획 회의록 정리', 'done'),
+          item(`x-${emp.id}-2`, 'KPI 대시보드 초안', 'in_progress'),
         ],
         carryover: [],
         instructions: [
@@ -394,10 +410,10 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
             reflect: 'unreflected',
           },
         ],
-      }
+      })
     case 'full_blocker':
     default:
-      return {
+      return withSections({
         ...empty,
         status: 'submitted',
         memo: '출장 정산은 녹음본 확보 후 재개 예정.',
@@ -407,11 +423,9 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
         submittedAt: `${TODAY} 17:10`,
         plan: [
           item('p1', '콘젯 크래들 랜스 유압실린더 점검', undefined, {
-            hours: 2,
             checked: false,
           }),
           item('p2', '사내 Wi‑Fi mesh 벽 고정 마무리', undefined, {
-            hours: 1,
             checked: false,
             attachments: [
               {
@@ -423,7 +437,6 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
             ],
           }),
           item('p3', '이동식 작업테이블 결재 진행', undefined, {
-            hours: 0.5,
             checked: false,
             attachments: [
               {
@@ -437,7 +450,6 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
         ],
         execution: [
           item('x1', '콘젯 크래들 랜스 동 부싱베어링 이상 없음 확인', 'done', {
-            hours: 1.5,
             attachments: [
               {
                 id: 'a3',
@@ -447,16 +459,12 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
               },
             ],
           }),
-          item('x2', '콘젯 유압실린더 분리·점검 (장시간 테스트 잔여)', 'in_progress', {
-            hours: 2,
-          }),
+          item('x2', '콘젯 유압실린더 분리·점검 (장시간 테스트 잔여)', 'in_progress'),
           item('x3', '사내 Wi‑Fi mesh 벽 고정', 'blocker', {
-            hours: 0.5,
             blockerReason: '벽면 브라켓·앵커 재고 부족, 구매 대기',
             supportRequest: '관리부 자재 긴급 발주 또는 임시 고정 방안 지시 요청',
           }),
           item('x4', '현대차 울산 펌프 스키드 커플링 얼라인먼트 1/2 완료', 'done', {
-            hours: 2,
             isAdHoc: true,
             attachments: [
               {
@@ -506,7 +514,7 @@ function todayReport(emp: Employee, empIndex: number): DailyReport {
             reflect: 'reflected',
           },
         ],
-      }
+      })
   }
 }
 

@@ -1,4 +1,10 @@
 import type { ClientAction } from '../actionTypes'
+import {
+  applyEveningCarryTransfer,
+  moveItemBetweenSections,
+  type WorkSection,
+} from '../lib/carryover'
+import { nowStampSeoul } from '../lib/dates'
 import { sanitizeAttachmentUrl } from '../lib/safeUrl'
 import type {
   AppSettings,
@@ -30,13 +36,31 @@ import {
   localAccountReclaimability,
   updateLocalAccount,
 } from './localAuth'
-import { loadAppState, saveAppState } from './stateRepo'
+import { loadAppState, saveAppState, syncCurrentDate } from './stateRepo'
 
 export type { ClientAction }
 
 function nowStamp(date: string) {
-  const now = new Date()
-  return `${date} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  return nowStampSeoul(date)
+}
+
+function emptyReportShell(
+  employeeId: string,
+  date: string,
+  id: string,
+): DailyReport {
+  return {
+    id,
+    employeeId,
+    date,
+    status: 'draft',
+    memo: '',
+    plan: [],
+    progress: [],
+    execution: [],
+    carryover: [],
+    instructions: [],
+  }
 }
 
 function uid(prefix: string) {
@@ -148,7 +172,10 @@ export async function runAction(
           state = await purgeLocalIdentity(stage, state, role.cursor_sub)
         }
       }
-      state = { ...createSeed(), settings: { ...DEFAULT_SETTINGS } }
+      state = syncCurrentDate({
+        ...createSeed(),
+        settings: { ...DEFAULT_SETTINGS },
+      }).state
       message = '시드 데이터로 초기화했습니다.'
       break
     }
@@ -218,17 +245,7 @@ export async function runAction(
         ),
         reports: [
           ...state.reports,
-          {
-            id: uid('r'),
-            employeeId: newEmployeeId,
-            date: state.currentDate,
-            status: 'draft',
-            memo: '',
-            plan: [],
-            execution: [],
-            carryover: [],
-            instructions: [],
-          },
+          emptyReportShell(newEmployeeId, state.currentDate, uid('r')),
         ],
       }
       await upsertRole({
@@ -354,17 +371,7 @@ export async function runAction(
         employees: [...state.employees, employee],
         reports: [
           ...state.reports,
-          {
-            id: uid('r'),
-            employeeId: newEmployeeId,
-            date: state.currentDate,
-            status: 'draft',
-            memo: '',
-            plan: [],
-            execution: [],
-            carryover: [],
-            instructions: [],
-          },
+          emptyReportShell(newEmployeeId, state.currentDate, uid('r')),
         ],
       }
 
@@ -442,7 +449,11 @@ export async function runAction(
       if (emp?.ooo && state.currentDate >= emp.ooo.start && state.currentDate <= emp.ooo.end) {
         return fail('ooo', '부재 기간에는 제출이 면제됩니다.')
       }
-      if (report.plan.length === 0 && report.execution.length === 0) {
+      if (
+        report.plan.length === 0 &&
+        (report.progress?.length ?? 0) === 0 &&
+        report.execution.length === 0
+      ) {
         return fail('invalid', '계획 항목을 하나 이상 추가해 주세요.')
       }
       const stamp = nowStamp(state.currentDate)
@@ -465,9 +476,11 @@ export async function runAction(
       if (!report.planSubmittedAt && !report.submittedAt) {
         return fail('invalid', '먼저 오전 계획을 제출해 주세요.')
       }
-      const blockers = [...report.execution, ...report.carryover].filter(
-        (i) => i.status === 'blocker',
-      )
+      const blockers = [
+        ...(report.progress ?? []),
+        ...report.execution,
+        ...report.carryover,
+      ].filter((i) => i.status === 'blocker')
       for (const b of blockers) {
         if (!b.blockerReason?.trim()) {
           return {
@@ -479,14 +492,17 @@ export async function runAction(
         }
       }
       const stamp = nowStamp(state.currentDate)
-      state = mapReport(state, action.reportId, (r) => ({
-        ...r,
-        execSubmittedAt: stamp,
-        submittedAt: stamp,
-        status: 'submitted',
-        managerAck: null,
-      }))
-      message = '실행·이월을 마감 제출했습니다.'
+      state = mapReport(state, action.reportId, (r) => {
+        const transferred = applyEveningCarryTransfer(r)
+        return {
+          ...transferred,
+          execSubmittedAt: stamp,
+          submittedAt: stamp,
+          status: 'submitted',
+          managerAck: null,
+        }
+      })
+      message = '실행·이월을 마감 제출했습니다. 미완료 항목을 이월로 옮겼습니다.'
       break
     }
     case 'checkPlanItem': {
@@ -504,7 +520,7 @@ export async function runAction(
         return {
           ...r,
           plan: r.plan.filter((p) => p.id !== action.planItemId),
-          execution: [...r.execution, moved],
+          progress: [...(r.progress ?? []), moved],
         }
       })
       break
@@ -519,7 +535,6 @@ export async function runAction(
           {
             id: uid('p'),
             text: action.text.trim(),
-            hours: 1,
             attachments: [],
             checked: false,
           },
@@ -532,13 +547,12 @@ export async function runAction(
       if (!action.text.trim()) return fail('invalid')
       state = mapReport(state, action.reportId, (r) => ({
         ...r,
-        execution: [
-          ...r.execution,
+        progress: [
+          ...(r.progress ?? []),
           {
             id: uid('x'),
             text: action.text.trim(),
             status: 'in_progress',
-            hours: 1,
             isAdHoc: true,
             attachments: [],
           },
@@ -546,14 +560,29 @@ export async function runAction(
       }))
       break
     }
+    case 'moveWorkItem': {
+      if (!canEditReport(session, state, action.reportId)) return fail('forbidden')
+      const to = action.to as WorkSection
+      if (!['plan', 'progress', 'execution', 'carryover'].includes(to)) {
+        return fail('invalid')
+      }
+      state = mapReport(state, action.reportId, (r) =>
+        moveItemBetweenSections(r, action.itemId, to),
+      )
+      break
+    }
     case 'updateWorkItem': {
       if (!canEditReport(session, state, action.reportId)) return fail('forbidden')
-      state = mapReport(state, action.reportId, (r) => ({
-        ...r,
-        [action.section]: r[action.section].map((item) =>
-          item.id === action.itemId ? { ...item, ...action.patch } : item,
-        ),
-      }))
+      const section = action.section as WorkSection
+      state = mapReport(state, action.reportId, (r) => {
+        const list = r[section] ?? []
+        return {
+          ...r,
+          [section]: list.map((item) =>
+            item.id === action.itemId ? { ...item, ...action.patch } : item,
+          ),
+        }
+      })
       break
     }
     case 'addAttachmentUrl': {
@@ -566,14 +595,18 @@ export async function runAction(
         label: safe.slice(0, 40),
         url: safe,
       }
-      state = mapReport(state, action.reportId, (r) => ({
-        ...r,
-        [action.section]: r[action.section].map((item) => {
-          if (item.id !== action.itemId) return item
-          if (item.attachments.length >= 3) return item
-          return { ...item, attachments: [...item.attachments, att] }
-        }),
-      }))
+      const section = action.section as WorkSection
+      state = mapReport(state, action.reportId, (r) => {
+        const list = r[section] ?? []
+        return {
+          ...r,
+          [section]: list.map((item) => {
+            if (item.id !== action.itemId) return item
+            if (item.attachments.length >= 3) return item
+            return { ...item, attachments: [...item.attachments, att] }
+          }),
+        }
+      })
       break
     }
     case 'setInstructionReflect': {

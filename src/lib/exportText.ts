@@ -18,13 +18,11 @@ function itemStatusKo(item: WorkItem): string {
 function formatItemLine(item: WorkItem, prefix = '-'): string[] {
   const st = itemStatusKo(item)
   const ad = item.isAdHoc ? ' [계획 외]' : ''
-  const hours =
-    typeof item.hours === 'number' && item.hours > 0 ? ` (${item.hours}h)` : ''
   const days =
     item.consecutiveDays && item.consecutiveDays > 0
       ? ` · 연속 ${item.consecutiveDays}일`
       : ''
-  const lines = [`${prefix} ${st ? `(${st}) ` : ''}${item.text}${ad}${hours}${days}`]
+  const lines = [`${prefix} ${st ? `(${st}) ` : ''}${item.text}${ad}${days}`]
   if (item.blockerReason) lines.push(`  · 사유: ${item.blockerReason}`)
   if (item.supportRequest) lines.push(`  · 요청: ${item.supportRequest}`)
   if (item.attachments?.length) {
@@ -50,6 +48,11 @@ function formatReportBlock(report: DailyReport): string[] {
   lines.push('[계획]')
   if (report.plan.length === 0) lines.push('- (없음)')
   else report.plan.forEach((p) => lines.push(...formatItemLine(p)))
+
+  lines.push('')
+  lines.push('[진행]')
+  if ((report.progress ?? []).length === 0) lines.push('- (없음)')
+  else (report.progress ?? []).forEach((x) => lines.push(...formatItemLine(x)))
 
   lines.push('')
   lines.push('[실행]')

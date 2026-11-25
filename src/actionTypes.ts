@@ -33,16 +33,22 @@ export type ClientAction =
   | { type: 'addPlanItem'; reportId: string; text: string }
   | { type: 'addAdHocExecution'; reportId: string; text: string }
   | {
+      type: 'moveWorkItem'
+      reportId: string
+      itemId: string
+      to: 'plan' | 'progress' | 'execution' | 'carryover'
+    }
+  | {
       type: 'updateWorkItem'
       reportId: string
-      section: 'plan' | 'execution' | 'carryover'
+      section: 'plan' | 'progress' | 'execution' | 'carryover'
       itemId: string
       patch: Partial<WorkItem>
     }
   | {
       type: 'addAttachmentUrl'
       reportId: string
-      section: 'plan' | 'execution' | 'carryover'
+      section: 'plan' | 'progress' | 'execution' | 'carryover'
       itemId: string
       url: string
     }

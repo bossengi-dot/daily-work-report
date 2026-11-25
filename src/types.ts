@@ -70,6 +70,8 @@ export interface DailyReport {
   date: string
   status: ReportStatus
   plan: WorkItem[]
+  /** 진행 — work started but not finished */
+  progress: WorkItem[]
   execution: WorkItem[]
   carryover: WorkItem[]
   instructions: CeoInstruction[]

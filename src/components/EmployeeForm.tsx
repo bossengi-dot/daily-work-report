@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { WorkSection } from '../lib/carryover'
 import { copyText } from '../lib/clipboard'
 import { isSafeAttachmentUrl } from '../lib/safeUrl'
 import { composeChatSummary } from '../lib/pushMessage'
@@ -48,17 +49,137 @@ function AttachmentList({ items }: { items: WorkItem['attachments'] }) {
   )
 }
 
-function StatusSegment({
+/** Local-buffered text so server round-trips do not steal focus/cursor. */
+function EditableItemText({
   value,
-  onChange,
+  onCommit,
+  placeholder,
 }: {
-  value: ItemStatus
-  onChange: (s: ItemStatus) => void
+  value: string
+  onCommit: (text: string) => void
+  placeholder?: string
 }) {
-  const opts: { v: ItemStatus; label: string }[] = [
-    { v: 'done', label: '완료' },
-    { v: 'in_progress', label: '진행' },
-    { v: 'blocker', label: '블로커' },
+  const [draft, setDraft] = useState(value)
+  const focused = useRef(false)
+
+  useEffect(() => {
+    if (!focused.current) setDraft(value)
+  }, [value])
+
+  return (
+    <input
+      className="item-text-input"
+      value={draft}
+      placeholder={placeholder ?? '업무 내용'}
+      onFocus={() => {
+        focused.current = true
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        focused.current = false
+        const next = draft.trim()
+        if (next && next !== value) onCommit(next)
+        else setDraft(value)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
+    />
+  )
+}
+
+function BlockerFields({
+  reason,
+  support,
+  onCommitReason,
+  onCommitSupport,
+  highlight,
+  autoFocus,
+}: {
+  reason: string
+  support: string
+  onCommitReason: (v: string) => void
+  onCommitSupport: (v: string) => void
+  highlight?: boolean
+  autoFocus?: boolean
+}) {
+  const [reasonDraft, setReasonDraft] = useState(reason)
+  const [supportDraft, setSupportDraft] = useState(support)
+  const reasonFocused = useRef(false)
+  const supportFocused = useRef(false)
+
+  useEffect(() => {
+    if (!reasonFocused.current) setReasonDraft(reason)
+  }, [reason])
+  useEffect(() => {
+    if (!supportFocused.current) setSupportDraft(support)
+  }, [support])
+
+  return (
+    <div className={`blocker-box ${highlight ? 'blocker-flash' : ''}`}>
+      <label>
+        사유 (필수)
+        <input
+          value={reasonDraft}
+          autoFocus={autoFocus}
+          placeholder="왜 막혔는지 한 줄로"
+          onFocus={() => {
+            reasonFocused.current = true
+          }}
+          onChange={(e) => setReasonDraft(e.target.value)}
+          onBlur={() => {
+            reasonFocused.current = false
+            if (reasonDraft !== reason) onCommitReason(reasonDraft)
+          }}
+        />
+      </label>
+      <label>
+        지원 요청 (선택)
+        <input
+          value={supportDraft}
+          placeholder="사장/동료에게 요청할 내용"
+          onFocus={() => {
+            supportFocused.current = true
+          }}
+          onChange={(e) => setSupportDraft(e.target.value)}
+          onBlur={() => {
+            supportFocused.current = false
+            if (supportDraft !== support) onCommitSupport(supportDraft)
+          }}
+        />
+      </label>
+    </div>
+  )
+}
+
+type SectionTarget = 'plan' | 'progress' | 'execution'
+
+function StatusControls({
+  section,
+  status,
+  onSection,
+  onBlocker,
+}: {
+  section: WorkSection
+  status?: ItemStatus
+  onSection: (to: SectionTarget) => void
+  onBlocker: () => void
+}) {
+  const opts: { v: SectionTarget | 'blocker'; label: string; active: boolean }[] = [
+    { v: 'plan', label: '계획', active: section === 'plan' && status !== 'blocker' },
+    {
+      v: 'progress',
+      label: '진행',
+      active: section === 'progress' && status !== 'blocker',
+    },
+    {
+      v: 'execution',
+      label: '완료',
+      active: section === 'execution' && status === 'done',
+    },
+    { v: 'blocker', label: '블로커', active: status === 'blocker' },
   ]
   return (
     <div className="seg" role="group" aria-label="상태">
@@ -66,12 +187,47 @@ function StatusSegment({
         <button
           key={o.v}
           type="button"
-          className={`seg-btn ${value === o.v ? `on on-${o.v}` : ''}`}
-          onClick={() => onChange(o.v)}
+          className={`seg-btn ${o.active ? `on on-${o.v === 'execution' ? 'done' : o.v === 'progress' ? 'in_progress' : o.v}` : ''}`}
+          onClick={() => {
+            if (o.v === 'blocker') onBlocker()
+            else onSection(o.v)
+          }}
         >
           {o.label}
         </button>
       ))}
+    </div>
+  )
+}
+
+function MoveMenu({
+  section,
+  onMove,
+}: {
+  section: WorkSection
+  onMove: (to: WorkSection) => void
+}) {
+  const targets: { to: WorkSection; label: string }[] = [
+    { to: 'plan', label: '계획' },
+    { to: 'progress', label: '진행' },
+    { to: 'execution', label: '실행' },
+    { to: 'carryover', label: '이월' },
+  ]
+  return (
+    <div className="move-menu" role="group" aria-label="섹션 이동">
+      {targets
+        .filter((t) => t.to !== section)
+        .map((t) => (
+          <button
+            key={t.to}
+            type="button"
+            className="btn btn-ghost btn-sm move-btn"
+            onClick={() => onMove(t.to)}
+            title={`${t.label}(으)로 이동`}
+          >
+            →{t.label}
+          </button>
+        ))}
     </div>
   )
 }
@@ -83,7 +239,7 @@ function AttachPopover({
   attachments,
 }: {
   reportId: string
-  section: 'execution' | 'carryover'
+  section: WorkSection
   itemId: string
   attachments: WorkItem['attachments']
 }) {
@@ -151,15 +307,84 @@ function AttachPopover({
   )
 }
 
+function WorkItemRow({
+  reportId,
+  section,
+  item,
+  highlight,
+}: {
+  reportId: string
+  section: WorkSection
+  item: WorkItem
+  highlight?: boolean
+}) {
+  const { updateWorkItem, moveWorkItem } = useStore()
+
+  const setBlocker = () => {
+    const target = section === 'plan' || section === 'execution' ? 'progress' : section
+    if (target !== section) {
+      void moveWorkItem(reportId, item.id, target).then(() =>
+        updateWorkItem(reportId, target, item.id, { status: 'blocker' }),
+      )
+    } else {
+      void updateWorkItem(reportId, section, item.id, { status: 'blocker' })
+    }
+  }
+
+  return (
+    <div
+      className={`exec-row ${highlight ? 'blocker-flash' : ''}`}
+      data-blocker-item={item.status === 'blocker' ? item.id : undefined}
+    >
+      <EditableItemText
+        value={item.text}
+        onCommit={(text) => updateWorkItem(reportId, section, item.id, { text })}
+      />
+      {item.isAdHoc && <span className="ad-hoc-tag">계획 외</span>}
+      <div className="item-meta">
+        {section === 'carryover' && <CarryBadge days={item.consecutiveDays} />}
+        <StatusControls
+          section={section}
+          status={item.status}
+          onSection={(to) => moveWorkItem(reportId, item.id, to)}
+          onBlocker={setBlocker}
+        />
+        <MoveMenu section={section} onMove={(to) => moveWorkItem(reportId, item.id, to)} />
+        <AttachPopover
+          reportId={reportId}
+          section={section}
+          itemId={item.id}
+          attachments={item.attachments}
+        />
+      </div>
+      <AttachmentList items={item.attachments} />
+      {item.status === 'blocker' && (
+        <div data-blocker-item={item.id}>
+          <BlockerFields
+            reason={item.blockerReason ?? ''}
+            support={item.supportRequest ?? ''}
+            highlight={highlight}
+            autoFocus={highlight}
+            onCommitReason={(blockerReason) =>
+              updateWorkItem(reportId, section, item.id, { blockerReason })
+            }
+            onCommitSupport={(supportRequest) =>
+              updateWorkItem(reportId, section, item.id, { supportRequest })
+            }
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function EmployeeForm() {
   const {
     state,
     actingAsEmployeeId,
     getReport,
-    checkPlanItem,
     addPlanItem,
     addAdHocExecution,
-    updateWorkItem,
     setInstructionReflect,
     updateReport,
     saveDraft,
@@ -177,7 +402,7 @@ export function EmployeeForm() {
   const [moreMenu, setMoreMenu] = useState(false)
   const [highlightBlockerId, setHighlightBlockerId] = useState<string | null>(null)
   const [planCollapsed, setPlanCollapsed] = useState(false)
-  const [execCollapsed, setExecCollapsed] = useState(false)
+  const [workCollapsed, setWorkCollapsed] = useState(false)
   const instrRef = useRef<HTMLDivElement>(null)
   const pushPreviewRef = useRef<HTMLTextAreaElement>(null)
 
@@ -190,16 +415,15 @@ export function EmployeeForm() {
   const evening = report ? isEveningDone(report) : false
 
   useEffect(() => {
-    // collapse inactive phase by default once morning done
     if (morning && !evening) {
       setPlanCollapsed(true)
-      setExecCollapsed(false)
+      setWorkCollapsed(false)
     } else if (!morning) {
       setPlanCollapsed(false)
-      setExecCollapsed(true)
+      setWorkCollapsed(true)
     } else {
       setPlanCollapsed(false)
-      setExecCollapsed(false)
+      setWorkCollapsed(false)
     }
   }, [morning, evening, actingAsEmployeeId])
 
@@ -207,6 +431,7 @@ export function EmployeeForm() {
     return <div className="empty">선택한 담당자의 당일 보고서가 없습니다.</div>
   }
 
+  const progress = report.progress ?? []
   const ooo = isOooOn(employee, state.currentDate)
   const unreflected = report.instructions.filter((i) => i.reflect === 'unreflected')
   const phase: 'morning' | 'evening' | 'done' = evening
@@ -214,7 +439,7 @@ export function EmployeeForm() {
     : morning
       ? 'evening'
       : 'morning'
-  const missingBlockerReason = [...report.execution, ...report.carryover].some(
+  const missingBlockerReason = [...progress, ...report.execution, ...report.carryover].some(
     (i) => i.status === 'blocker' && !i.blockerReason?.trim(),
   )
 
@@ -285,7 +510,7 @@ export function EmployeeForm() {
               {report.execSubmittedAt
                 ? `마감 ${report.execSubmittedAt}`
                 : morning
-                  ? '실행·이월 후 마감'
+                  ? '진행·실행·이월 후 마감'
                   : '오전 제출 후'}
             </div>
           </div>
@@ -294,14 +519,13 @@ export function EmployeeForm() {
 
       <div className="employee-layout">
         <div className="stack">
-          {/* Plan */}
           <section
             className={`panel panel-pad phase-panel ${phase === 'morning' ? 'active-phase' : ''} ${planCollapsed ? 'collapsed' : ''}`}
           >
             <div className="section-title">
               <h2>
                 계획{' '}
-                <span className="hint" title="체크 시 실행으로 이동">
+                <span className="hint" title="진행/실행으로 자유롭게 이동">
                   ⓘ
                 </span>
               </h2>
@@ -324,21 +548,13 @@ export function EmployeeForm() {
                   </div>
                 )}
                 {report.plan.map((item) => (
-                  <div className="item-row" key={item.id}>
-                    <input
-                      type="checkbox"
-                      aria-label={`${item.text} 실행으로 이동`}
-                      onChange={() => checkPlanItem(report.id, item.id)}
-                    />
-                    <div>
-                      <div className="item-text">{item.text}</div>
-                      <div className="item-meta">
-                        <AttachmentList items={item.attachments} />
-                        {item.hours != null && <span className="hours">{item.hours}h</span>}
-                      </div>
-                    </div>
-                    <span className="hours">예정</span>
-                  </div>
+                  <WorkItemRow
+                    key={item.id}
+                    reportId={report.id}
+                    section="plan"
+                    item={item}
+                    highlight={highlightBlockerId === item.id}
+                  />
                 ))}
                 <div className="add-row">
                   <input
@@ -370,86 +586,40 @@ export function EmployeeForm() {
             )}
           </section>
 
-          {/* Execution */}
           <section
-            className={`panel panel-pad phase-panel ${phase === 'evening' || phase === 'done' ? 'active-phase' : ''} ${execCollapsed ? 'collapsed' : ''}`}
+            className={`panel panel-pad phase-panel ${phase === 'evening' || phase === 'done' ? 'active-phase' : ''} ${workCollapsed ? 'collapsed' : ''}`}
           >
             <div className="section-title">
               <h2>
-                실행 <span className="hint" title="오늘 수행 기록">ⓘ</span>
+                진행 <span className="hint" title="오늘 진행 중">ⓘ</span>
               </h2>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => setExecCollapsed((c) => !c)}
+                onClick={() => setWorkCollapsed((c) => !c)}
               >
-                {execCollapsed ? '펼치기' : '접기'}
+                {workCollapsed ? '펼치기' : '접기'}
               </button>
             </div>
-            {!execCollapsed && (
+            {!workCollapsed && (
               <>
-                {report.execution.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`exec-row ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
-                    data-blocker-item={item.status === 'blocker' ? item.id : undefined}
-                  >
-                    <div className="item-text">
-                      {item.text} {item.isAdHoc && <span className="ad-hoc-tag">계획 외</span>}
-                    </div>
-                    <div className="item-meta">
-                      <StatusSegment
-                        value={item.status ?? 'in_progress'}
-                        onChange={(s) =>
-                          updateWorkItem(report.id, 'execution', item.id, { status: s })
-                        }
-                      />
-                      {item.hours != null && <span className="hours">{item.hours}h</span>}
-                      <AttachPopover
-                        reportId={report.id}
-                        section="execution"
-                        itemId={item.id}
-                        attachments={item.attachments}
-                      />
-                    </div>
-                    <AttachmentList items={item.attachments} />
-                    {item.status === 'blocker' && (
-                      <div
-                        className={`blocker-box ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
-                        data-blocker-item={item.id}
-                      >
-                        <label>
-                          사유 (필수)
-                          <input
-                            value={item.blockerReason ?? ''}
-                            onChange={(e) =>
-                              updateWorkItem(report.id, 'execution', item.id, {
-                                blockerReason: e.target.value,
-                              })
-                            }
-                            placeholder="왜 막혔는지 한 줄로"
-                            autoFocus={highlightBlockerId === item.id}
-                          />
-                        </label>
-                        <label>
-                          지원 요청 (선택)
-                          <input
-                            value={item.supportRequest ?? ''}
-                            onChange={(e) =>
-                              updateWorkItem(report.id, 'execution', item.id, {
-                                supportRequest: e.target.value,
-                              })
-                            }
-                            placeholder="사장/동료에게 요청할 내용"
-                          />
-                        </label>
-                      </div>
-                    )}
+                {progress.length === 0 && (
+                  <div className="empty" style={{ padding: 12 }}>
+                    진행 항목 없음
                   </div>
+                )}
+                {progress.map((item) => (
+                  <WorkItemRow
+                    key={item.id}
+                    reportId={report.id}
+                    section="progress"
+                    item={item}
+                    highlight={highlightBlockerId === item.id}
+                  />
                 ))}
                 <div className="add-row">
                   <input
-                    placeholder="+ 계획 외 실행…"
+                    placeholder="+ 계획 외 진행…"
                     value={adHocDraft}
                     onChange={(e) => setAdHocDraft(e.target.value)}
                     onKeyDown={(e) => {
@@ -474,66 +644,55 @@ export function EmployeeForm() {
             )}
           </section>
 
-          {/* Carryover */}
           <section
-            className={`panel panel-pad phase-panel ${phase === 'evening' || phase === 'done' ? 'active-phase' : ''} ${execCollapsed ? 'collapsed' : ''}`}
+            className={`panel panel-pad phase-panel ${phase === 'evening' || phase === 'done' ? 'active-phase' : ''} ${workCollapsed ? 'collapsed' : ''}`}
+          >
+            <div className="section-title">
+              <h2>
+                실행 <span className="hint" title="오늘 완료한 업무">ⓘ</span>
+              </h2>
+            </div>
+            {!workCollapsed && (
+              <>
+                {report.execution.length === 0 && (
+                  <div className="empty" style={{ padding: 12 }}>
+                    실행 항목 없음
+                  </div>
+                )}
+                {report.execution.map((item) => (
+                  <WorkItemRow
+                    key={item.id}
+                    reportId={report.id}
+                    section="execution"
+                    item={item}
+                    highlight={highlightBlockerId === item.id}
+                  />
+                ))}
+              </>
+            )}
+          </section>
+
+          <section
+            className={`panel panel-pad phase-panel ${phase === 'evening' || phase === 'done' ? 'active-phase' : ''} ${workCollapsed ? 'collapsed' : ''}`}
           >
             <div className="section-title">
               <h2>이월</h2>
             </div>
-            {!execCollapsed &&
-              report.carryover.map((item) => (
-                <div
-                  className={`exec-row ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
-                  key={item.id}
-                  data-blocker-item={item.status === 'blocker' ? item.id : undefined}
-                >
-                  <div className="item-text">{item.text}</div>
-                  <div className="item-meta">
-                    <CarryBadge days={item.consecutiveDays} />
-                    <StatusSegment
-                      value={item.status ?? 'in_progress'}
-                      onChange={(s) =>
-                        updateWorkItem(report.id, 'carryover', item.id, { status: s })
-                      }
-                    />
-                    <AttachPopover
-                      reportId={report.id}
-                      section="carryover"
-                      itemId={item.id}
-                      attachments={item.attachments}
-                    />
-                  </div>
-                  {item.status === 'blocker' && (
-                    <div
-                      className={`blocker-box ${highlightBlockerId === item.id ? 'blocker-flash' : ''}`}
-                      data-blocker-item={item.id}
-                    >
-                      <label>
-                        사유
-                        <input
-                          value={item.blockerReason ?? ''}
-                          onChange={(e) =>
-                            updateWorkItem(report.id, 'carryover', item.id, {
-                              blockerReason: e.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                      <label>
-                        지원 요청
-                        <input
-                          value={item.supportRequest ?? ''}
-                          onChange={(e) =>
-                            updateWorkItem(report.id, 'carryover', item.id, {
-                              supportRequest: e.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-                  )}
+            {!workCollapsed &&
+              (report.carryover.length === 0 ? (
+                <div className="empty" style={{ padding: 12 }}>
+                  이월 없음
                 </div>
+              ) : (
+                report.carryover.map((item) => (
+                  <WorkItemRow
+                    key={item.id}
+                    reportId={report.id}
+                    section="carryover"
+                    item={item}
+                    highlight={highlightBlockerId === item.id}
+                  />
+                ))
               ))}
           </section>
 
@@ -619,41 +778,41 @@ export function EmployeeForm() {
 
         <aside className="stack">
           <div ref={instrRef}>
-          <section className="panel panel-pad">
-            <div className="section-title">
-              <h2>사장 지시</h2>
-            </div>
-            <p className="hint" style={{ marginTop: -6, marginBottom: 12 }}>
-              반영 여부를 기록하세요.
-            </p>
-            {report.instructions.length === 0 && (
-              <div className="empty" style={{ padding: 8 }}>
-                지시 없음
+            <section className="panel panel-pad">
+              <div className="section-title">
+                <h2>사장 지시</h2>
               </div>
-            )}
-            {report.instructions.map((ins) => (
-              <div className="instruction-card" key={ins.id} id={`instr-${ins.id}`}>
-                <div className="date">{ins.date}</div>
-                <div className="text">{ins.text}</div>
-                <div className="reflect-toggle">
-                  <button
-                    type="button"
-                    className={ins.reflect === 'reflected' ? 'on-reflected' : ''}
-                    onClick={() => setInstructionReflect(report.id, ins.id, 'reflected')}
-                  >
-                    반영됨
-                  </button>
-                  <button
-                    type="button"
-                    className={ins.reflect === 'unreflected' ? 'on-unreflected' : ''}
-                    onClick={() => setInstructionReflect(report.id, ins.id, 'unreflected')}
-                  >
-                    미반영
-                  </button>
+              <p className="hint" style={{ marginTop: -6, marginBottom: 12 }}>
+                반영 여부를 기록하세요.
+              </p>
+              {report.instructions.length === 0 && (
+                <div className="empty" style={{ padding: 8 }}>
+                  지시 없음
                 </div>
-              </div>
-            ))}
-          </section>
+              )}
+              {report.instructions.map((ins) => (
+                <div className="instruction-card" key={ins.id} id={`instr-${ins.id}`}>
+                  <div className="date">{ins.date}</div>
+                  <div className="text">{ins.text}</div>
+                  <div className="reflect-toggle">
+                    <button
+                      type="button"
+                      className={ins.reflect === 'reflected' ? 'on-reflected' : ''}
+                      onClick={() => setInstructionReflect(report.id, ins.id, 'reflected')}
+                    >
+                      반영됨
+                    </button>
+                    <button
+                      type="button"
+                      className={ins.reflect === 'unreflected' ? 'on-unreflected' : ''}
+                      onClick={() => setInstructionReflect(report.id, ins.id, 'unreflected')}
+                    >
+                      미반영
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
           </div>
 
           <section className="panel panel-pad">

@@ -7,8 +7,22 @@ export function composeChatSummary(employee: Employee, report: DailyReport): str
   lines.push('')
 
   lines.push('■ 계획')
-  if (report.plan.length === 0) lines.push('- (실행으로 이관됨 / 없음)')
+  if (report.plan.length === 0) lines.push('- (없음)')
   else report.plan.forEach((p) => lines.push(`- ${p.text}`))
+
+  lines.push('')
+  lines.push('■ 진행')
+  if ((report.progress ?? []).length === 0) lines.push('- (없음)')
+  else {
+    for (const x of report.progress ?? []) {
+      const st = x.status === 'blocker' ? '블로커' : '진행'
+      const ad = x.isAdHoc ? ' [계획 외]' : ''
+      lines.push(`- (${st})${ad} ${x.text}`)
+      if (x.status === 'blocker' && x.blockerReason) {
+        lines.push(`  · 사유: ${x.blockerReason}`)
+      }
+    }
+  }
 
   lines.push('')
   lines.push('■ 실행')
@@ -35,9 +49,11 @@ export function composeChatSummary(employee: Employee, report: DailyReport): str
     }
   }
 
-  const blockers = [...report.execution, ...report.carryover].filter(
-    (i) => i.status === 'blocker',
-  )
+  const blockers = [
+    ...(report.progress ?? []),
+    ...report.execution,
+    ...report.carryover,
+  ].filter((i) => i.status === 'blocker')
   lines.push('')
   lines.push(`■ 블로커 ${blockers.length}건`)
   if (blockers.length === 0) lines.push('- 없음')

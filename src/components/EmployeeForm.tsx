@@ -154,6 +154,38 @@ function BlockerFields({
   )
 }
 
+/** Local-buffered memo so updateReport round-trips do not steal focus/cursor. */
+function MemoField({
+  value,
+  onCommit,
+}: {
+  value: string
+  onCommit: (memo: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  const focused = useRef(false)
+
+  useEffect(() => {
+    if (!focused.current) setDraft(value)
+  }, [value])
+
+  return (
+    <textarea
+      rows={3}
+      placeholder="필요 시 메모"
+      value={draft}
+      onFocus={() => {
+        focused.current = true
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        focused.current = false
+        if (draft !== value) onCommit(draft)
+      }}
+    />
+  )
+}
+
 type SectionTarget = 'plan' | 'progress' | 'execution'
 
 function StatusControls({
@@ -820,11 +852,11 @@ export function EmployeeForm() {
               <h2>참고 메모</h2>
             </div>
             <div className="field">
-              <textarea
-                rows={3}
-                placeholder="필요 시 메모"
+              <MemoField
                 value={report.memo}
-                onChange={(e) => updateReport(report.id, { memo: e.target.value })}
+                onCommit={(memo) => {
+                  void updateReport(report.id, { memo })
+                }}
               />
             </div>
           </section>
